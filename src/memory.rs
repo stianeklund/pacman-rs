@@ -1,4 +1,3 @@
-use crate::util::ReadWrite;
 use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
@@ -28,45 +27,30 @@ impl IndexMut<u16> for Memory {
         &mut self.memory[index as usize]
     }
 }
+
 impl Index<u16> for Memory {
     type Output = u8;
     fn index(&self, index: u16) -> &u8 {
         &self.memory[index as usize]
     }
 }
-
-impl ReadWrite for Memory {
-    fn read_byte(&self, addr: u16) -> u8 {
-        self.memory[addr as usize & 0xFFFF]
+pub trait MemoryRW {
+    fn read8(&self, addr: u16) -> u8;
+    fn read16(&self, addr: u16) -> u16 {
+        (self.read8(addr.wrapping_add(1)) as u16) << 8 | self.read8(addr) as u16
     }
-
-    fn read_word(&self, addr: u16) -> u16 {
-        // (self.read_byte(addr.wrapping_add(1)) as u16) << 8 | self.read_byte(addr) as u16
-        let lo = self.read(addr);
-        let hi = self.read(addr.wrapping_add(1));
-        return hi << 8 | lo
-    }
-
     fn read_hb(&self, addr: u16) -> u8 {
-        self.read_byte(addr.wrapping_add(2))
+        self.read8(addr.wrapping_add(2))
     }
-
     fn read_lb(&self, addr: u16) -> u8 {
-        self.read_byte(addr.wrapping_add(1))
+        self.read8(addr.wrapping_add(1))
     }
-
-    fn read(&self, addr: u16) -> u16 {
-        u16::from(self.memory[addr as usize])
-    }
-
-    fn write_word(&mut self, addr: u16, word: u16) {
-        self.write_byte(addr, word as u8);
-        self.write_byte(addr.wrapping_add(1), (word >> 8) as u8);
-    }
-    fn write_byte(&mut self, addr: u16, byte: u8) {
-        self.memory[addr as usize & 0xFFFF] = byte
-    }
+    fn read(&self, addr: u16) -> u16;
+    fn read_word(&self, addr: u16) -> u16;
+    fn write_word(&mut self, addr: u16, word: u16);
+    fn write_byte(&mut self, addr: u16, byte: u8);
 }
+
 impl Memory {
     pub fn new() -> Memory {
         Memory {
@@ -101,6 +85,6 @@ impl Memory {
         file.read_to_end(&mut buf).expect("Failed to read binary");
         // Tests are loaded at 0x0100
         self.memory[0x0100..(buf.len() + 0x0100)].clone_from_slice(&buf[..]);
-        println!("Test loaded: {:?} Bytes: {:?}", path, buf.len());
+        println!("Test loaded: {:?} Bytes: {:?}\n", path, buf.len());
     }
 }

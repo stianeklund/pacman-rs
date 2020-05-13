@@ -1,10 +1,9 @@
 use crate::memory::Memory;
-use crate::Interconnect;
 use minifb::{Scale, Window, WindowOptions};
 use std::fmt;
 
 pub const WIDTH: u32 = 224;
-pub const HEIGHT: u32 = 256;
+pub const HEIGHT: u32 = 288;
 
 pub struct Display {
     pub raster: Vec<u32>,
@@ -54,15 +53,15 @@ impl Display {
         let memory = &memory.memory;
 
         // Iterate over VRAM
-        for (i, byte) in (memory[0x2400..0x4000]).iter().enumerate() {
-            let y = i as isize * 8 / 256;
+        for (i, byte) in (memory[0x04000..0x5FFF]).iter().enumerate() {
+            let y = i as isize * 8 / 288;
 
             for shift in 0..(7 + 1) {
-                let x = ((i * 8) % 256 as usize + shift as usize) as isize;
+                let x = ((i * 8) % 288 as usize + shift as usize) as isize;
 
                 // Rotate frame buffer 90 deg
                 let new_x = y as isize;
-                let new_y = (-x as isize + 256) - 1;
+                let new_y = (-x as isize + 288 as isize) - 1;
 
                 let pixel = if byte.wrapping_shr(shift) & 1 == 0 {
                     0xFF00_0000 // Alpha

@@ -1,4 +1,4 @@
-use crate::cpu::{Io, Registers};
+use crate::cpu::Io;
 use minifb::{Key, KeyRepeat, Window};
 use std::borrow::Borrow;
 

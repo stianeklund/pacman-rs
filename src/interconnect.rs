@@ -1,9 +1,8 @@
-use super::cpu::CPU;
-use crate::display::Display;
+use super::cpu::Cpu;
 use crate::keypad::Keypad;
 
 pub struct Interconnect {
-    pub cpu: CPU,
+    pub cpu: Cpu,
     pub keypad: Keypad,
     pub frame_count: u32,
 }
@@ -11,7 +10,7 @@ pub struct Interconnect {
 impl Interconnect {
     pub fn new() -> Self {
         Self {
-            cpu: CPU::new(),
+            cpu: Cpu::new(),
             keypad: Keypad::new(),
             frame_count: 0,
         }
@@ -20,28 +19,30 @@ impl Interconnect {
     pub fn execute_cpu(&mut self) -> u32 {
         // self.cpu.debug = true;
         let mut cycles_executed: usize = 0;
+        // Cycles per frame should be: 3072000
+        // Divide amount of cycles per frame with 60 FPS
+        // Divide that by 2 to get half cycles per frame (for interrupts)
 
-        self.cpu.debug = true;
-        while cycles_executed <= 16666 {
+        while cycles_executed <= 25_600 {
             let start_cycles = self.cpu.cycles;
-            self.cpu.execute_instruction();
+            self.cpu.debug = false;
             if self.cpu.debug {
                 println!("{:?}", self.cpu);
             }
+            self.cpu.decode();
+
             cycles_executed += self.cpu.cycles - start_cycles;
-            self.cpu.try_interrupt();
+            // self.cpu.try_interrupt();
         }
 
         self.frame_count += 1;
         return self.frame_count;
     }
 
-    // Step once when pressing a key
     pub fn run_tests(&mut self) {
-        if self.cpu.debug {
-            // println!("{}", self.cpu);
-        }
-        // self.execute_cpu();
         self.cpu.execute_tests();
+        /*if self.cpu.debug {
+            println!("{}", self.cpu);
+        }*/
     }
 }
