@@ -26,12 +26,12 @@ mod tests {
 
     fn exec_test(bin: &str) -> u16 {
         let mut i = Interconnect::new();
+        i.cpu.reset();
         i.cpu.memory.load_tests(bin);
 
-        // Inject RET (0xC9) at 0x0005 to handle CALL 5h
-        // CALL 5 is the last subroutine call in the test.
-        // If successful it should return to 0x0005.
-        // i.cpu.memory.memory[5] = 0xC9;
+        // Inject RET (0xC9) at 0x0007 to handle the return call.
+        // Inject IN, A * to trigger printing of characters.
+        // If successful it should return to 0x0007.
 
         i.cpu.memory.memory[0x0000] = 0xD3;
         i.cpu.memory.memory[0x0001] = 0x00;
@@ -41,8 +41,7 @@ mod tests {
 
         // All test binaries start at 0x0100.
         i.cpu.reg.pc = 0x0100;
-
-        // i.cpu.debug = false;
+        // i.cpu.debug = true;
         let _cycles = 0;
 
         loop {
@@ -52,8 +51,7 @@ mod tests {
                 assert_ne!(i.cpu.reg.pc, 0x76);
             }
 
-            // If PC is 5 we're at the return address we set earlier.
-            if i.cpu.reg.pc == 05 {
+            if i.cpu.reg.pc == 07 {
                 if i.cpu.reg.c == 9 {
                     let mut de = (i.cpu.reg.d as u16) << 8 | (i.cpu.reg.e as u16);
                     'print: loop {
@@ -70,10 +68,17 @@ mod tests {
                     print!("{}", i.cpu.reg.e as char);
                 }
             }
+            let af = ((i.cpu.reg.a as u16) << 8 |  (i.cpu.flags.get() as u16));
+            if af == 0x0040 && i.cpu.reg.sp == 0x2fff && i.cpu.cycles == 14810168 {
+                eprintln!("{:#?}", i.cpu.flags);
+                eprintln!("{:?}", i.cpu);
+                eprintln!("{}", i.cpu);
+                panic!();
+            }
 
             if i.cpu.reg.pc == 0 {
-                println!("\nJump to 0 from {:04X}", i.cpu.reg.prev_pc);
-                assert_eq!(i.cpu.reg.prev_pc, 0x14F);
+                println!(" Jump to 0 from {:04X}", i.cpu.reg.prev_pc);
+                println!("Cycles executed: {}", i.cpu.cycles);
                 break;
             }
         }

@@ -19,6 +19,31 @@ impl Display for Registers {
 impl Display for Cpu {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         fmt.align();
+        write!(fmt, "PC: {:>04X}, ", self.reg.pc)?;
+        write!(fmt, "AF: {:>02X}{:02X}, ", self.reg.a, self.flags.get())?;
+        write!(fmt, "BC: {:>02X}{:02X}, ", self.reg.b, self.reg.c)?;
+        write!(fmt, "DE: {:>02X}{:02X}, ", self.reg.d, self.reg.e)?;
+        write!(fmt, "HL: {:>02X}{:02X}, ", self.reg.h, self.reg.l)?;
+        write!(fmt, "SP: {:>04X}, ", self.reg.sp)?;
+        write!(fmt, "IX: {:>04X}, ", self.reg.ix)?;
+        write!(fmt, "IY: {:>04X}, ", self.reg.iy)?;
+        write!(fmt, "I: {:02X}, ", self.irq.int as u8)?;
+        write!(fmt, "R: {:02X}\t", self.reg.r as u8)?;
+        write!(
+            fmt,
+            "({:02X} {:02X} {:02X} {:02X}), ",
+            self.read(self.reg.pc),
+            self.read(self.reg.pc + 1),
+            self.read(self.reg.pc + 2),
+            self.read(self.reg.pc + 3)
+        );
+       write!(fmt, "cyc: {}", self.cycles)
+    }
+}
+/*
+impl Display for Cpu {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
+        fmt.align();
         write!(fmt, "{:w$}", &self.current_instruction, w = 12)?;
         write!(
             fmt,
@@ -46,6 +71,7 @@ impl Display for Cpu {
         write!(fmt, "I:{}", self.irq.int as u8)
     }
 }
+*/
 
 // TODO Refactor the above to fit this style
 impl Debug for Cpu {
