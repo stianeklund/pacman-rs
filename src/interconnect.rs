@@ -25,10 +25,6 @@ impl Interconnect {
 
         while cycles_executed <= 25_600 {
             let start_cycles = self.cpu.cycles;
-            self.cpu.debug = false;
-            if self.cpu.debug {
-                println!("{:?}", self.cpu);
-            }
             self.cpu.decode();
 
             cycles_executed += self.cpu.cycles - start_cycles;
@@ -40,9 +36,6 @@ impl Interconnect {
     }
 
     pub fn run_tests(&mut self) {
-        self.cpu.execute_tests();
-        /*if self.cpu.debug {
-            println!("{}", self.cpu);
-        }*/
+        self.cpu.decode();
     }
 }

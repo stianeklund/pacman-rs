@@ -1,8 +1,8 @@
 use crate::instruction_info::{Register, Register::*, Instruction};
 use crate::memory::{Memory, MemoryRW};
-use std::convert::TryInto;
 
 // Increment & assign
+#[macro_export]
 macro_rules! increment {
     ($reg:expr) => {{
         $reg = $reg.wrapping_add(1);
@@ -46,14 +46,14 @@ pub struct Flags {
     pub cf: bool,
 
     // Shadow
-    pub s_: bool,
-    pub z_: bool,
+    pub sf_: bool,
+    pub zf_: bool,
     pub yf_: bool,
-    pub h_: bool,
+    pub hf_: bool,
     pub xf_: bool,
-    pub p_: bool,
-    pub n_: bool,
-    pub c_: bool,
+    pub pf_: bool,
+    pub nf_: bool,
+    pub cf_: bool,
 }
 
 // IFF1 determines whether interrupts are allowed.
@@ -121,21 +121,20 @@ pub struct Registers {
 impl Registers {
     // Swaps the value between the normal registers and shadow registers
     fn swap(&mut self) {
-        let a = self.a;
         let b = self.b;
         let c = self.c;
         let d = self.d;
         let e = self.e;
         let h = self.h;
         let l = self.l;
-        self.a = self.a_;
+
         self.b = self.b_;
         self.c = self.c_;
         self.d = self.d_;
         self.e = self.e_;
         self.h = self.h_;
         self.l = self.l_;
-        self.a_ = a;
+
         self.b_ = b;
         self.c_ = c;
         self.d_ = d;
@@ -146,6 +145,26 @@ impl Registers {
 }
 
 impl Flags {
+    fn new() -> Self { 
+        Self {
+            sf: false,
+            zf: false,
+            yf: false,
+            hf: false,
+            xf: false,
+            pf: false,
+            nf: false,
+            cf: false,
+            sf_: false,
+            zf_: false,
+            yf_: false,
+            hf_: false,
+            xf_: false,
+            pf_: false,
+            nf_: false,
+            cf_: false
+        }
+    }
     pub(crate) fn get(&self) -> u8 {
 
         return if self.sf { 0x80 } else { 0x0 }
@@ -156,8 +175,8 @@ impl Flags {
             | if self.pf { 0x04 } else { 0x0 }
             | if self.nf { 0x02 } else { 0x0 }
             | if self.cf { 0x01 } else { 0x0 }
-    }
 
+    }
     pub fn set(&mut self, value: u8) {
         self.sf = value & 0x80 != 0;
         self.zf = value & 0x40 != 0;
@@ -168,34 +187,33 @@ impl Flags {
         self.nf = value & 0x02 != 0;
         self.cf = value & 0x01 != 0;
     }
+    pub(crate) fn get_shadow(&self) -> u8 {
+
+        return if self.sf_ { 0x80 } else { 0x0 }
+            | if self.zf_ { 0x40 } else { 0x0 }
+            | if self.yf_ { 0x20 } else { 0x0 }
+            | if self.hf_ { 0x10 } else { 0x0 }
+            | if self.xf_ { 0x08 } else { 0x0 }
+            | if self.pf_ { 0x04 } else { 0x0 }
+            | if self.nf_ { 0x02 } else { 0x0 }
+            | if self.cf_ { 0x01 } else { 0x0 }
+    }
+
+    pub fn set_shadow(&mut self, value: u8) {
+        self.sf_ = value & 0x80 != 0;
+        self.zf_ = value & 0x40 != 0;
+        self.yf_ = value & 0x20 != 0;
+        self.hf_ = value & 0x10 != 0;
+        self.xf_ = value & 0x08 != 0;
+        self.pf_ = value & 0x04 != 0;
+        self.nf_ = value & 0x02 != 0;
+        self.cf_ = value & 0x01 != 0;
+    }
 
     fn swap(&mut self) {
-        let s = self.sf;
-        let z = self.zf;
-        let yf = self.yf;
-        let h = self.hf;
-        let xf = self.xf;
-        let p = self.pf;
-        let n = self.nf;
-        let c = self.cf;
-
-        self.sf = self.s_;
-        self.zf = self.z_;
-        self.yf = self.yf_;
-        self.hf = self.h_;
-        self.xf = self.xf_;
-        self.pf = self.p_;
-        self.nf = self.n_;
-        self.cf = self.c_;
-
-        self.s_ = s;
-        self.z_ = z;
-        self.yf = yf;
-        self.h_ = h;
-        self.xf = xf;
-        self.p_ = p;
-        self.n_ = n;
-        self.c_ = c;
+        let f = self.get();
+        self.set(self.get_shadow());
+        self.set_shadow(f);
     }
 }
 
@@ -235,7 +253,7 @@ impl Cpu {
         Cpu {
             opcode: 0,
             reg: Registers::default(),
-            flags: Flags::default(),
+            flags: Flags::new(),
             cycles: 0,
             current_instruction: String::new(),
             interrupt_addr: 0x08,
@@ -316,7 +334,7 @@ impl Cpu {
     }
 
     // Loads register pair with direct value
-    fn set_pair(&mut self, reg: Register, value: u16) {
+    pub fn set_pair(&mut self, reg: Register, value: u16) {
         match reg {
             DE => {
                 self.reg.d = (value >> 8) as u8;
@@ -335,7 +353,7 @@ impl Cpu {
             _ => panic!("Attempting to write to a non register pair"),
         }
     }
-    fn get_pair(&self, reg: Register) -> u16 {
+    pub fn get_pair(&self, reg: Register) -> u16 {
         return match reg {
             BC => (self.reg.b as u16) << 8 | (self.reg.c as u16),
             DE => (self.reg.d as u16) << 8 | (self.reg.e as u16),
@@ -383,6 +401,30 @@ impl Cpu {
         self.adv_cycles(4);
         self.adv_pc(1);
     }
+    fn adc_hl(&mut self, reg: Register) {
+        let mut result = match reg {
+            BC => (self.get_pair(HL) as u32).wrapping_add(self.get_pair(BC) as u32).wrapping_add(self.flags.cf as u32),
+            DE => (self.get_pair(HL) as u32).wrapping_add(self.get_pair(DE) as u32).wrapping_add(self.flags.cf as u32),
+            HL => (self.get_pair(HL) as u32).wrapping_add(self.get_pair(HL) as u32).wrapping_add(self.flags.cf as u32),
+            SP => (self.get_pair(HL) as u32).wrapping_add(self.reg.sp as u32),
+            _ => panic!("Register: {:?} Not allowed for ADC HL", reg),
+        };
+
+        self.reg.h = (result >> 8) as u8;
+        self.reg.l = result as u8;
+
+        self.flags.sf = (result & 0x80) != 0;
+        self.flags.zf = (result & 0xFF) == 0;
+        self.flags.pf = self.overflow(result.wrapping_sub(1) as u16, result as u16);
+        self.flags.cf = ((result >> 8) & 0x0100) != 0;
+        self.flags.hf = self.hf_add(self.reg.a, (result >> 8) as u8);
+        self.flags.nf = false;
+        self.flags.yf = (result >> 8) & 0x20 != 0;
+        self.flags.xf = (result >> 8) & 0x08 != 0;
+
+        self.adv_cycles(15);
+        self.adv_pc(2);
+    }
 
     // Add Immediate to Accumulator with Carry
     fn adc_im(&mut self) {
@@ -397,7 +439,6 @@ impl Cpu {
 
         self.flags.sf = (result & 0x80) != 0;
         self.flags.zf = (result & 0xFF) == 0;
-        self.flags.yf = result & 0x20 != 0;
         self.flags.hf = self.hf_add(reg_a, value as u8);
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -502,7 +543,7 @@ impl Cpu {
         self.flags.xf = result & 0x08 != 0;
         self.flags.nf = false;
         self.flags.hf = ((self.reg.a | value as u8) & 0x08) != 0;
-        self.flags.pf = self.overflow(self.reg.a as u16, result);
+        self.flags.pf = self.parity(result as u8);
         // self.flags.pf = self.carry(7, result as u16, value as u16, false) != self.carry(8, result as u16, value as u16, false);
         self.flags.cf = false;
 
@@ -515,30 +556,26 @@ impl Cpu {
     fn djnz(&mut self) {
         // The b register is decremented, and if not zero the signed value * is added to PC
         // The jump is measured from the start of the last instruction opcode
-        self.reg.prev_pc = self.reg.pc;
-        self.reg.b = self.reg.b.wrapping_sub(1);
-        if self.reg.b > 0 {
-            let addr = self.read8(self.reg.pc);
-            self.reg.pc = self.read8(self.reg.pc + addr as u16 + 1) as u16;
-            self.adv_cycles(13);
-        } else {
-            self.adv_pc(1);
-            self.adv_cycles(8);
-        }
+        self.adv_cycles(1);
+        decrement!(self.reg.b);
+        self.jr_cond(self.reg.b != 0);
     }
-    fn jr(&mut self, _offset: u16) {
-        self.reg.pc = self.reg.pc.wrapping_add(_offset);
+    // TODO Clean up JR
+    fn jr(&mut self, offset: i16) {
+        self.adv_pc(2);
+        self.reg.prev_pc = self.reg.pc;
+        self.reg.pc = (self.reg.pc as i16 + offset) as u16;
         self.adv_cycles(12);
     }
     // "Generic" function for conditional JR operations
     fn jr_cond(&mut self, cond: bool) {
         // E.g if zero flag == 0 { JR + offset
+        let byte = self.read8(self.reg.pc + 1) as i8;
         if cond {
-            self.reg.prev_pc = self.reg.pc;
-            self.jr(self.read(self.reg.pc + 1))
+            self.jr(byte as i16);
         } else {
-            self.adv_pc(2);
             self.adv_cycles(7);
+            self.adv_pc(2);
         }
     }
     fn jp(&mut self, addr: u16) {
@@ -558,7 +595,7 @@ impl Cpu {
 
     // Jump to address in H:L
     fn pchl(&mut self) {
-        self.adv_cycles(5);
+        self.adv_cycles(4);
         self.reg.prev_pc = self.reg.pc;
         self.reg.pc = self.get_pair(Register::HL) as u16;
     }
@@ -589,8 +626,7 @@ impl Cpu {
         self.set_pair(BC, self.get_pair(BC).wrapping_sub(1));
 
         while self.get_pair(BC) != 0 {
-            self.write_byte(de as u16, hl as u8);
-            self.flags.pf = true;
+            self.ldir();
         }
 
         self.flags.yf = (hl + self.reg.a as u16) & 0x20 != 0;
@@ -688,7 +724,7 @@ impl Cpu {
         if cond {
             self.call(addr);
         } else {
-            self.adv_cycles(11);
+            self.adv_cycles(10);
             self.adv_pc(3);
         }
     }
@@ -755,7 +791,6 @@ impl Cpu {
         self.flags.sf = (result & 0x80) != 0;
         self.flags.zf = (result & 0xFF) == 0;
 
-        // self.flags.hf = self.carry_sub(4, a as u16, !result, false);
         self.flags.hf = self.hf_sub(a as u8, value as u8);
         self.flags.cf = (result & 0x0100) != 0;
         self.flags.nf = true;
@@ -787,20 +822,24 @@ impl Cpu {
         self.flags.xf = value & 0x08 != 0;
     }
 
-    fn add_hl(&mut self, reg: Register) {
-        let mut result = match reg {
-            BC => (self.get_pair(HL) as u32).wrapping_add(self.get_pair(BC) as u32),
-            DE => (self.get_pair(HL) as u32).wrapping_add(self.get_pair(DE) as u32),
-            HL => (self.get_pair(HL) as u32).wrapping_add(self.get_pair(HL) as u32),
-            SP => (self.get_pair(HL) as u32).wrapping_add(self.reg.sp as u32),
+    pub(crate) fn add_hl(&mut self, reg: Register) {
+        let hl: u16 = self.get_pair(HL);
+        let (result, add) = match reg {
+            BC => (((self.get_pair(HL) as u32).wrapping_add(self.get_pair(BC) as u32)), self.get_pair(BC)),
+            DE => (((self.get_pair(HL) as u32).wrapping_add(self.get_pair(DE) as u32)), self.get_pair(DE)),
+            HL => (((self.get_pair(HL) as u32).wrapping_add(self.get_pair(HL) as u32)), self.get_pair(HL)),
+            SP => (((self.get_pair(HL) as u32).wrapping_add(self.reg.sp as u32)), self.get_pair(SP)),
             _ => panic!("Register: {:?} Not allowed for ADD HL", reg),
         };
 
         self.reg.h = (result >> 8) as u8;
         self.reg.l = result as u8;
         self.flags.cf = ((result >> 8) & 0x0100) != 0;
-        // self.flags.cf = ((result >> 8) & 0x10_000) != 0;
-        self.flags.hf = self.hf_add(self.reg.a, ((result >> 8) as u8));
+
+        // self.flags.hf = self.hf_add_w(hl, add as u16);
+        self.flags.hf = self.carry(12, hl, add as u16);
+        // Fails at 14810168 cycles where AF is 0040h but should be 0050, i.e HF should still be set.
+
         self.flags.nf = false;
         self.flags.yf = (result >> 8) & 0x20 != 0;
         self.flags.xf = (result >> 8) & 0x08 != 0;
@@ -836,7 +875,9 @@ impl Cpu {
         self.flags.sf = (result & 0x80) != 0;
         self.flags.zf = (result & 0xFF) == 0;
         self.flags.hf = self.hf_sub(result.wrapping_add(1), 1);
-        self.flags.pf = self.overflow(result.wrapping_add(1) as u16, 1 as u16);
+
+        self.flags.pf = self.carry(7, result.wrapping_add(1) as u16, !1_u16) != self.carry(8, result.wrapping_add(1) as u16, !1_u16);
+        // self.flags.pf = self.overflow(result.wrapping_add(1) as u16, 1 as u16);
         self.flags.nf = true;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -974,13 +1015,12 @@ impl Cpu {
     fn rlca(&mut self) {
         // The Carry bit is set equal to the high-order bit of the accumulator
         // If one of the 4 higher bits are 1 we set the carry flag.
-        self.reg.a = self.reg.a.rotate_left(1);
         self.flags.cf = (self.reg.a & 1) != 0;
+        self.reg.a = (self.reg.a << 1) | self.flags.cf as u8;
         self.flags.yf = self.reg.a & 0x20 != 0;
         self.flags.xf = self.reg.a & 0x08 != 0;
         self.flags.nf = false;
         self.flags.hf = false;
-
         self.adv_cycles(4);
         self.adv_pc(1);
     }
@@ -988,8 +1028,9 @@ impl Cpu {
     fn rrca(&mut self) {
         // The Carry bit is set equal to the low-order bit of the accumulator
         // If one of the 4 lower bits are 1 we set the carry flag.
-        self.reg.a = self.reg.a.rotate_right(1);
-        self.flags.cf = (self.reg.a & 0x80) != 0;
+        self.flags.cf = (self.reg.a & 1) != 0;
+       //  self.reg.a = self.reg.a.rotate_right(1) | self.flags.cf as u8;
+        self.reg.a = (self.reg.a >> 1) | ((self.flags.cf as u8) << 7);
         self.flags.yf = self.reg.a & 0x20 != 0;
         self.flags.xf = self.reg.a & 0x08 != 0;
         self.flags.nf = false;
@@ -1026,7 +1067,7 @@ impl Cpu {
     }
 
     // LDA Load Accumulator direct
-    fn lda(&mut self) {
+    fn lda_im(&mut self) {
         let imm = self.read16(self.reg.pc + 1);
         self.reg.a = self.memory[imm];
         self.adv_cycles(13);
@@ -1078,7 +1119,7 @@ impl Cpu {
         self.adv_pc(2);
     }
 
-    fn inc(&mut self, reg: Register) {
+    pub(crate) fn inc(&mut self, reg: Register) {
         let result = match reg {
             A => increment!(self.reg.a),
             B => increment!(self.reg.b),
@@ -1101,8 +1142,10 @@ impl Cpu {
         self.flags.zf = (result & 0xFF) == 0;
 
         self.flags.hf = self.hf_add(result.wrapping_sub(1), 1);
-        // self.flags.pf = self.carry(7, result.wrapping_sub(1) as u16, 1_u16, false) != self.carry(8, result.wrapping_sub(1) as u16, 1_u16, false);
-        self.flags.pf = self.overflow(result.wrapping_sub(1) as u16, 1);
+
+        // self.flags.hf = self.carry(4, result.wrapping_sub(1) as u16 , 1 as u16);
+        self.flags.pf = self.carry(7, result.wrapping_sub(1) as u16, 1_u16) != self.carry(8, result.wrapping_sub(1) as u16, 1_u16);
+        // self.flags.pf = self.overflow(result.wrapping_sub(1) as u16, result as u16); // < -- this doesn't work properly, parity flag is being set when it's not supposed to
         self.flags.nf = false;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -1126,13 +1169,11 @@ impl Cpu {
                 self.reg.l = (value & 0xFF) as u8;
             }
             SP => self.reg.sp = self.reg.sp.wrapping_add(1),
-            // 0xED23
             IX => {
                 self.reg.ix = self.reg.ix.wrapping_add(1);
                 self.adv_cycles(4);
                 self.adv_pc(1);
             }
-            // 0xFD23
             IY => {
                 self.reg.iy = self.reg.iy.wrapping_add(1);
                 self.adv_cycles(4);
@@ -1343,24 +1384,44 @@ impl Cpu {
         self.adv_pc(2);
     }
 
-    fn ex_af(&mut self) {
+    fn ex_af_af(&mut self) {
         let a = self.reg.a;
-        self.reg.a = self.reg.a_;
-        self.reg.a = a;
+        let a_ = self.reg.a_;
+        self.reg.a = a_;
+        self.reg.a_ = a;
         self.flags.swap();
         self.adv_cycles(4);
         self.adv_pc(1);
     }
     fn exx(&mut self) {
-        self.reg.swap();
+        let b = self.reg.b;
+        let c = self.reg.c;
+        let d = self.reg.d;
+        let e = self.reg.e;
+        let h = self.reg.h;
+        let l = self.reg.l;
+
+        self.reg.b = self.reg.b_;
+        self.reg.c = self.reg.c_;
+        self.reg.d = self.reg.d_;
+        self.reg.e = self.reg.e_;
+        self.reg.h = self.reg.h_;
+        self.reg.l = self.reg.l_;
+
+        self.reg.b_ = b;
+        self.reg.c_ = c;
+        self.reg.d_ = d;
+        self.reg.e_ = e;
+        self.reg.h_ = h;
+        self.reg.l_ = l;
         self.adv_pc(1);
         self.adv_cycles(4);
     }
-    fn xchg(&mut self) {
+    fn ex_de_hl(&mut self) {
         use std::mem;
         mem::swap(&mut self.reg.h, &mut self.reg.d);
         mem::swap(&mut self.reg.l, &mut self.reg.e);
-        self.adv_cycles(5);
+        self.adv_cycles(4);
         self.adv_pc(1);
     }
 
@@ -1699,8 +1760,10 @@ impl Cpu {
 
     pub fn decode(&mut self) {
         use self::Register::*;
+        if self.debug { println!("{}", self); }
         self.opcode = self.read(self.reg.pc);
         self.instruction = Instruction::decode(self.opcode);
+
 
         if self.instruction.name.to_string().len() < 1 {
             self.current_instruction = format!("{:w$}", self.current_instruction, w = 12);
@@ -1708,9 +1771,7 @@ impl Cpu {
             self.current_instruction = self.instruction.name.to_string();
         }
 
-        if self.debug {
-            println!("{}", self);
-        }
+
         // The R register is incremented once for each instruction, and + 1 for each additional
         // instruction, e.g 0xCB, 0xDD, 0xED etc.
         match self.opcode {
@@ -1722,7 +1783,7 @@ impl Cpu {
             0x05 => self.dec(B),
             0x06 => self.mvi(B),
             0x07 => self.rlca(),
-            0x08 => self.ex_af(),
+            0x08 => self.ex_af_af(),
             0x09 => self.add_hl(BC),
             0x10 => self.djnz(),
 
@@ -1740,7 +1801,7 @@ impl Cpu {
             0x15 => self.dec(D),
             0x16 => self.mvi(D),
             0x17 => self.rla(),
-            0x18 => self.jr(self.read(self.reg.pc + 1)),
+            0x18 => self.jr(self.read(self.reg.pc) as i16),
             0x19 => self.add_hl(DE),
 
             0x1A => self.ld_ex(DE),
@@ -1776,10 +1837,10 @@ impl Cpu {
             0x35 => self.dec(HL),
             0x36 => self.mvi(HL),
             0x37 => self.scf(),
-            0x38 => self.jr_cond(self.flags.cf),
+            0x38 => self.jr_cond(self.flags.cf), // JR C, *
             0x39 => self.add_hl(SP),
 
-            0x3A => self.lda(),
+            0x3A => self.lda_im(),
             0x3B => self.dex(SP),
             0x3C => self.inc(A),
             0x3D => self.dec(A),
@@ -1979,14 +2040,23 @@ impl Cpu {
             0xDA => self.jp_cond(self.flags.cf),
             0xDB => self.in_(A),
             0xDC => self.call_cond(0xDC, self.flags.cf),
-            0x00DD => {
+            0xDD => {
                 self.opcode = self.read_word(self.reg.pc);
+                self.instruction.opcode = self.opcode;
                 match self.opcode {
                     0xDD09 => unimplemented!(),
                     0xDD19 => unimplemented!(),
-                    0xDD21 => unimplemented!(),
-                    0xDD22 => unimplemented!(),
-                    0xDD23 => unimplemented!(),
+                    0xDD21 => {
+                        self.reg.ix = self.read16(self.reg.pc + 2); self.adv_pc(4); self.adv_cycles(14);
+
+
+                    }
+                    0xDD22 => {
+                        self.write_byte(self.read(self.reg.pc + 2), self.read16(self.reg.ix) as u8);
+                        self.adv_pc(4);
+                        self.adv_cycles(20);
+                    }
+                    0xDD23 => self.inx(IX),
                     0xDD24 => unimplemented!(),
                     0xDD25 => unimplemented!(),
                     0xDD26 => unimplemented!(),
@@ -2005,7 +2075,15 @@ impl Cpu {
                     0xDD3E => unimplemented!(),
                     0xDDE1 => self.pop(IX),
                     0xDDE5 => self.push(IX),
-                    0xDDE9 => self.jp(self.get_pair(IX)),
+                    0xDD7E => {
+                        // byte is the signed displacement byte
+                        let byte = self.read(self.reg.pc + 2) as i8;
+                        let addr = self.reg.ix.wrapping_add(byte as u16);
+                        self.reg.a = self.read(addr) as i8 as u8;
+                        self.adv_pc(3);
+                        self.adv_cycles(19);
+                    },
+                    0xDDE9 => { self.opcode = 0xDDE9; self.instruction.cycles = 8; self.jp(self.get_pair(IX)); },
                     _ => panic!("{:#?}", Instruction::decode(self.opcode)),
                 }
                 self.reg.r = self.reg.r & 0x80 | self.reg.r.wrapping_add(1) & 0x7f;
@@ -2024,7 +2102,7 @@ impl Cpu {
             0xE9 => self.pchl(),
 
             0xEA => self.jp_cond(self.flags.pf),
-            0xEB => self.xchg(),
+            0xEB => self.ex_de_hl(),
             0xEC => self.call_cond(0xEC, self.flags.pf),
             0xED => {
                 self.opcode = self.read_word(self.reg.pc);
@@ -2038,6 +2116,7 @@ impl Cpu {
                     0xED56 => self.set_interrupt_mode(1),
                     0xED66 => self.set_interrupt_mode(0),
                     0xED76 => self.set_interrupt_mode(1),
+                    0xED4A => self.adc_hl(BC),
                     0xED4B => self.load_ed(BC),
                     0xED47 => self.ld(I, A),
                     0xED4F => self.ld(R, A),
@@ -2074,8 +2153,12 @@ impl Cpu {
                 match self.opcode {
                     0xFD09 => unimplemented!(),
                     0xFD19 => unimplemented!(),
-                    0xFD21 => unimplemented!(),
-                    0xFD22 => unimplemented!(),
+                    0xFD21 => { self.reg.iy = self.read16(self.reg.pc + 2); self.adv_pc(4); self.adv_cycles(14);},
+                    0xFD22 => {
+                        self.write_byte(self.read(self.reg.pc + 2), self.read16(self.reg.iy) as u8);
+                        self.adv_pc(4);
+                        self.adv_cycles(20);
+                    },
                     0xFD23 => self.inx(IY),
                     0xFD24 => unimplemented!(),
                     0xFD25 => unimplemented!(),
@@ -2088,7 +2171,15 @@ impl Cpu {
                     0xFD2E => unimplemented!(),
                     0xFDE1 => self.pop(IY),
                     0xFDE5 => self.push(IY),
-                    0xFDE9 => self.sub(IY),
+                    0xFDE9 => { self.instruction.cycles = 8; self.jp(self.get_pair(IY)) },
+                    0xFD7E => {
+                        // byte is the signed displacement byte
+                        let byte = self.read(self.reg.pc + 2) as i8;
+                        let addr = self.reg.iy.wrapping_add(byte as u16);
+                        self.reg.a = self.read(addr) as i8 as u8;
+                        self.adv_pc(3);
+                        self.adv_cycles(19);
+                    }
                     _ => panic!("{:#?}", Instruction::decode(self.opcode)),
                 }
             }
@@ -2097,9 +2188,6 @@ impl Cpu {
             _ => println!("Unknown opcode: {:04X}", self.opcode),
         }
         self.reg.r = self.reg.r & 0x80 | self.reg.r.wrapping_add(1) & 0x7f;
-    }
-    pub fn execute_tests(&mut self) {
-        self.decode();
     }
 
     pub fn reset(&mut self) {
@@ -2142,14 +2230,23 @@ impl Cpu {
     // Borrowed from github.com/superzazu for debugging purposes
     // returns if there was a carry between bit "bit_no" and "bit_no - 1" when
     // executing "a + b + cy"
-    fn carry(&self, bit_no: u8, a: u16, b: u16, cy: bool) -> bool {
-        let result = a.wrapping_add(b).wrapping_add(cy as u16);
+    fn carry(&self, bit_no: u8, a: u16, b: u16) -> bool {
+        let result = a.wrapping_add(b);
         let carry = result ^ a ^ b;
         return bool::from(carry & (1 << bit_no) != 0);
     }
 
     fn hf_add(&self, a: u8, b: u8) -> bool {
-        (((a & 0xF) + (b & 0xF)) & 0x10) == 0x10
+        // (((a & 0xF) + (b & 0xF)) & 0x10) == 0x10
+        ((((a & 0xF) + (b & 0xF)) & 0x10) & (1 << 4)) != 0
+    }
+    fn hf_add_w(&self, a: u16, b: u16) -> bool {
+        // Check carry of bit 12
+        (((a & 0x0F00) + (b & 0x0F00) & 0x1000) & (1 << 12)) != 0
+    }
+    fn hf_sub_w(a: u16, b:u16) -> bool {
+        // ((((a as i16 & 0x0F00) + (b as i16 & 0x0F00)) & 0x1000) & (1 << 12)) != 0
+            (((a as i16 & 0x0F00) - (b as i16 & 0x0F00)) & 0x1000) < 0
     }
 
     fn hf_sub(&self, a: u8, b: u8) -> bool {

@@ -33,15 +33,14 @@ impl Display for Cpu {
             fmt,
             "({:02X} {:02X} {:02X} {:02X}), ",
             self.read(self.reg.pc),
-            self.read(self.reg.pc + 1),
-            self.read(self.reg.pc + 2),
-            self.read(self.reg.pc + 3)
+            self.read(self.reg.pc.wrapping_add(1)),
+            self.read(self.reg.pc.wrapping_add(2)),
+            self.read(self.reg.pc.wrapping_add(3))
         );
        write!(fmt, "cyc: {}", self.cycles)
     }
 }
-/*
-impl Display for Cpu {
+/*impl Display for Cpu {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         fmt.align();
         write!(fmt, "{:w$}", &self.current_instruction, w = 12)?;
@@ -49,9 +48,9 @@ impl Display for Cpu {
             fmt,
             "({:02X} {:02X} {:02X} {:02X})\t",
             self.read(self.reg.pc),
-            self.read(self.reg.pc + 1),
-            self.read(self.reg.pc + 2),
-            self.read(self.reg.pc + 3)
+            self.read(self.reg.pc.wrapping_add(1)),
+            self.read(self.reg.pc.wrapping_add(2)),
+            self.read(self.reg.pc.wrapping_add(3))
         );
         write!(fmt, "Opcode: ")?;
         write!(fmt, "{:>04X}\t", self.opcode)?;
@@ -70,8 +69,7 @@ impl Display for Cpu {
         write!(fmt, "H:{} ", self.flags.hf as u8)?;
         write!(fmt, "I:{}", self.irq.int as u8)
     }
-}
-*/
+}*/
 
 // TODO Refactor the above to fit this style
 impl Debug for Cpu {

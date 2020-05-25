@@ -18,7 +18,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut display = display::Display::new();
     i.cpu.memory.load_bin(&args);
-    i.cpu.debug = true;
+    // i.cpu.debug = true;
 
     loop {
         // For debugging (executing one instruction at a time)
