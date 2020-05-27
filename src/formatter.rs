@@ -16,7 +16,7 @@ impl Display for Registers {
     }
 }
 
-impl Display for Cpu {
+impl Debug for Cpu {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         fmt.align();
         write!(fmt, "PC: {:>04X}, ", self.reg.pc)?;
@@ -27,31 +27,31 @@ impl Display for Cpu {
         write!(fmt, "SP: {:>04X}, ", self.reg.sp)?;
         write!(fmt, "IX: {:>04X}, ", self.reg.ix)?;
         write!(fmt, "IY: {:>04X}, ", self.reg.iy)?;
-        write!(fmt, "I: {:02X}, ", self.irq.int as u8)?;
+        write!(fmt, "I: {:02X}, ", self.int.int as u8)?;
         write!(fmt, "R: {:02X}\t", self.reg.r as u8)?;
         write!(
             fmt,
             "({:02X} {:02X} {:02X} {:02X}), ",
-            self.read(self.reg.pc),
-            self.read(self.reg.pc.wrapping_add(1)),
-            self.read(self.reg.pc.wrapping_add(2)),
-            self.read(self.reg.pc.wrapping_add(3))
-        );
-       write!(fmt, "cyc: {}", self.cycles)
+            self.read8(self.reg.pc),
+            self.read8(self.reg.pc.wrapping_add(1)),
+            self.read8(self.reg.pc.wrapping_add(2)),
+            self.read8(self.reg.pc.wrapping_add(3))
+        )?;
+        write!(fmt, "cyc: {}", self.cycles)
     }
 }
-/*impl Display for Cpu {
+impl Display for Cpu {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         fmt.align();
         write!(fmt, "{:w$}", &self.current_instruction, w = 12)?;
         write!(
             fmt,
             "({:02X} {:02X} {:02X} {:02X})\t",
-            self.read(self.reg.pc),
-            self.read(self.reg.pc.wrapping_add(1)),
-            self.read(self.reg.pc.wrapping_add(2)),
-            self.read(self.reg.pc.wrapping_add(3))
-        );
+            self.read8(self.reg.pc),
+            self.read8(self.reg.pc.wrapping_add(1)),
+            self.read8(self.reg.pc.wrapping_add(2)),
+            self.read8(self.reg.pc.wrapping_add(3))
+        )?;
         write!(fmt, "Opcode: ")?;
         write!(fmt, "{:>04X}\t", self.opcode)?;
         write!(fmt, "PC:{:>04X}\t", self.reg.pc)?;
@@ -67,11 +67,11 @@ impl Display for Cpu {
         write!(fmt, "P:{} ", self.flags.pf as u8)?;
         write!(fmt, "C:{} ", self.flags.cf as u8)?;
         write!(fmt, "H:{} ", self.flags.hf as u8)?;
-        write!(fmt, "I:{}", self.irq.int as u8)
+        write!(fmt, "I:{}", self.int.int as u8)
     }
-}*/
+}
 
-// TODO Refactor the above to fit this style
+/*// TODO Refactor the above to fit this style
 impl Debug for Cpu {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
         writeln!(
@@ -114,4 +114,4 @@ impl Debug for Cpu {
             self.irq.int as u8
         )
     }
-}
+}*/

@@ -1,5 +1,5 @@
 use super::cpu::Cpu;
-use crate::keypad::Keypad;
+use crate::pacman::keypad::Keypad;
 
 pub struct Interconnect {
     pub cpu: Cpu,
@@ -25,10 +25,11 @@ impl Interconnect {
 
         while cycles_executed <= 25_600 {
             let start_cycles = self.cpu.cycles;
-            self.cpu.decode();
+            self.cpu.execute();
 
             cycles_executed += self.cpu.cycles - start_cycles;
             // self.cpu.try_interrupt();
+            self.cpu.handle_interrupts(cycles_executed as u8);
         }
 
         self.frame_count += 1;
@@ -36,6 +37,6 @@ impl Interconnect {
     }
 
     pub fn run_tests(&mut self) {
-        self.cpu.decode();
+        self.cpu.execute();
     }
 }

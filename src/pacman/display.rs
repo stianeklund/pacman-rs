@@ -1,6 +1,8 @@
-use crate::memory::Memory;
-use minifb::{Scale, Window, WindowOptions};
 use std::fmt;
+
+use minifb::{Scale, Window, WindowOptions};
+
+use crate::memory::Memory;
 
 pub const WIDTH: u32 = 224;
 pub const HEIGHT: u32 = 288;
@@ -26,6 +28,7 @@ impl fmt::UpperHex for Display {
 }
 
 const SCALE: usize = 8;
+
 impl Display {
     pub fn new() -> Self {
         let mut window = Window::new(
@@ -40,7 +43,7 @@ impl Display {
         )
         .unwrap();
 
-        window.set_position(500, 500);
+        window.set_position(400, 400);
         Display {
             // TODO: Is there a better way to handle resize / different scaling?
             raster: vec![0x00FF_FFFF; WIDTH as usize * HEIGHT as usize * SCALE],
@@ -50,29 +53,21 @@ impl Display {
     }
 
     pub fn draw_pixel(&mut self, memory: &Memory) {
-        let memory = &memory.memory;
+        let memory = &memory.ram;
 
         // Iterate over VRAM
-        for (i, byte) in (memory[0x04000..0x5FFF]).iter().enumerate() {
-            let y = i as isize * 8 / 288;
+        for (i, byte) in (memory[0x04000..0x4FFF]).iter().enumerate() {
+            let y = i as isize * 8 / 224;
 
             for shift in 0..(7 + 1) {
-                let x = ((i * 8) % 288 as usize + shift as usize) as isize;
-
-                // Rotate frame buffer 90 deg
-                let new_x = y as isize;
-                let new_y = (-x as isize + 288 as isize) - 1;
+                let x = ((i * 8) % 224 as usize + shift as usize) as isize;
 
                 let pixel = if byte.wrapping_shr(shift) & 1 == 0 {
                     0xFF00_0000 // Alpha
-                } else if x <= 63 && (x >= 15 || x <= 15 && y >= 20 && y <= 120) {
-                    0xFF00_FF00 // Green
-                } else if x >= 200 && x <= 220 {
-                    0xFF00_00FF // Red
                 } else {
                     0xFFFF_FFFF // Black
                 };
-                self.raster[WIDTH as usize * new_y as usize + new_x as usize] = pixel;
+                self.raster[WIDTH as usize * x as usize + y as usize] = pixel;
             }
         }
     }

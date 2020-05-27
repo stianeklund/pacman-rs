@@ -1,18 +1,19 @@
-extern crate byteorder;
 extern crate minifb;
 
 use crate::interconnect::Interconnect;
-use crate::keypad::Input;
+use crate::pacman::display;
 
 mod cpu;
-mod display;
+mod formatter;
 mod instruction_info;
 mod interconnect;
-mod keypad;
 mod memory;
 mod tests;
-mod formatter;
-
+mod pacman {
+    pub mod display;
+    pub mod keypad;
+    mod pacman;
+}
 fn main() {
     let i = &mut Interconnect::new();
     let args: Vec<String> = std::env::args().collect();
@@ -21,18 +22,15 @@ fn main() {
     // i.cpu.debug = true;
 
     loop {
-        // For debugging (executing one instruction at a time)
         // std::io::stdin().read_line(&mut String::new()).unwrap();
-        i.execute_cpu(); // <-- handles interrupts for us. One execution == 1 frame
-        i.keypad.key_down(&mut i.cpu.io, &display.window);
+        i.execute_cpu();
+        // i.keypad.key_down(&mut i.cpu.io, &display.window);
 
         display.draw_pixel(&i.cpu.memory);
         display.window.update_with_buffer(&display.raster).unwrap();
 
-        // Reset I/O port values every 5 frames
-        // TODO: Implement better timing
-        if i.frame_count % 5 == 1 {
+        /*if i.frame_count % 5 == 1 {
             i.keypad.reset_ports(&mut i.cpu.io);
-        }
+        }*/
     }
 }
