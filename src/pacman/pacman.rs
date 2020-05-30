@@ -62,7 +62,6 @@ impl Pacman {
             c_counter: false,
         }
     }
-
 }
 // Mapper trait for the Pacman hardware
 pub trait Mapper {
@@ -111,4 +110,3 @@ impl Mapper for Pacman {
         }
     }
 }
-

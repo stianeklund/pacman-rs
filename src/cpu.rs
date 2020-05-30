@@ -1,40 +1,6 @@
 use crate::instruction_info::{Instruction, Register, Register::*};
 use crate::memory::{Memory, MemoryRW};
 
-// TODO Move macros out of CPU
-// Helper macros to increment or decrement, and returned the assigned value.
-// Assignments return () and we work around that with these macros.
-// match reg {
-//     A => { self.reg.a = self.reg.a.wrapping_add(1); self.reg.a },
-// Becomes:
-// match reg {
-//     A => inc_ret!(self.reg.a)
-#[macro_export]
-macro_rules! inc_ret {
-    ($reg:expr) => {{
-        $reg = $reg.wrapping_add(1);
-        $reg
-    }};
-}
-
-macro_rules! dec_ret {
-    ($reg:expr) => {{
-        $reg = $reg.wrapping_sub(1);
-        $reg
-    }};
-}
-macro_rules! rlc_ret {
-    ($reg:expr, $flag:expr) => {{
-        $reg = ($reg << 1) | ($flag << 7);
-        $reg
-    }};
-}
-macro_rules! rrc_ret {
-    ($reg:expr, $flag:expr) => {{
-        $reg = ($reg >> 1) | ($flag << 7);
-        $reg
-    }};
-}
 #[derive(Default)]
 pub struct Io {
     pub port0: u8,
@@ -266,6 +232,7 @@ impl Cpu {
             H => self.reg.h,
             L => self.reg.l,
             M => self.reg.m,
+            I => self.reg.i,
             R => self.reg.r,
             IX => self.reg.ix as u8,
             IXH => (self.reg.ix >> 8) as u8,
@@ -283,7 +250,7 @@ impl Cpu {
                     self.current_instruction, self.opcode
                 );
                 eprintln!("Instruction:{:?}", Instruction::decode(self.opcode));
-                panic!("Register not supported");
+                panic!("Register not supported:{:#?}", reg)
             }
         }
     }
@@ -303,31 +270,13 @@ impl Cpu {
         }
     }
 
-    // Loads register pair with value at location
-    fn write_pair_indirect(&mut self, reg: Register, word: u16) {
-        match reg {
-            DE => {
-                self.write_reg(D, self.read8(word + 1) as u8);
-                self.write_reg(E, self.read8(word) as u8);
-            }
-            BC => {
-                self.write_reg(B, self.read8(word + 1) as u8);
-                self.write_reg(C, self.read8(word) as u8);
-            }
-            HL => {
-                self.write_reg(H, self.read8(word + 1) as u8);
-                self.write_reg(L, self.read8(word) as u8);
-            }
-            SP => self.reg.sp = word,
-            IX => self.reg.ix = word,
-            IY => self.reg.iy = word,
-            _ => panic!("Attempting to write to a non register pair"),
-        }
-    }
-
     // Loads register pair with direct value
     pub fn write_pair_direct(&mut self, reg: Register, value: u16) {
         match reg {
+            AF => {
+                self.flags.set((value & 0xFF) as u8);
+                self.reg.a = (value >> 8) as u8;
+            }
             DE => {
                 self.reg.d = (value >> 8) as u8;
                 self.reg.e = (value & 0xFF) as u8;
@@ -459,7 +408,6 @@ impl Cpu {
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_add(self.reg.a, self.get_pair(src) as u8);
-        // self.flags.pf = self.carry(7, result as u16, value as u16, false) != self.carry(8, result as u16, value as u16, false);
         self.flags.pf = self.overflow(self.reg.a, result as u8);
         self.flags.nf = false;
         self.flags.yf = result & 0x20 != 0;
@@ -469,11 +417,11 @@ impl Cpu {
         self.adv_pc(2);
     }
     fn add(&mut self, reg: Register) {
-        let value = if reg != Register::HL {
+        let value = if reg != HL {
             self.read_reg(reg)
         } else {
             self.adv_cycles(3);
-            self.memory[self.get_pair(Register::HL)]
+            self.memory[self.get_pair(HL)]
         };
 
         let result = (self.reg.a as u16).wrapping_add(value as u16);
@@ -481,7 +429,6 @@ impl Cpu {
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_add(self.reg.a, value);
-        // self.flags.pf = self.carry(7, result as u16, value as u16, false) != self.carry(8, result as u16, value as u16, false);
         self.flags.pf = self.overflow(self.reg.a, result as u8);
         self.flags.nf = false;
         self.flags.yf = result & 0x20 != 0;
@@ -503,12 +450,10 @@ impl Cpu {
         // Set CPU flags with new accumulator values
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
-        // self.flags.pf = self.carry(7, result as u16, value as u16, false) != self.carry(8, result as u16, value as u16, false);
         self.flags.pf = self.overflow(self.reg.a, result as u8);
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
         self.flags.nf = false;
-        // self.flags.hf = (self.reg.a as u8 & 0x0F) + (value as u8 & 0x0F) > 0x0F;
         self.flags.hf = self.hf_add(self.reg.a, value as u8);
         self.flags.cf = result & 0x0100 != 0;
 
@@ -535,7 +480,6 @@ impl Cpu {
         self.flags.nf = false;
         self.flags.hf = true;
         self.flags.pf = self.parity(result);
-        // self.flags.pf = self.carry(7, result as u16, value as u16, false) != self.carry(8, result as u16, value as u16, false);
         self.flags.cf = false;
 
         self.reg.a = result as u8;
@@ -546,9 +490,6 @@ impl Cpu {
 
     fn ani(&mut self) {
         // The byte of immediate data is ANDed with the contents of the accumulator
-        // The Carry bit is reset to zero.
-        // Set half carry if the accumulator or opcode and the lower 4 bits are 1.
-
         let value = self.read8(self.reg.pc + 1);
         let result = self.reg.a as u16 & value as u16;
 
@@ -571,7 +512,7 @@ impl Cpu {
         // The b register is decremented, and if not zero the signed value * is added to PC
         // The jump is measured from the start of the last instruction opcode
         self.adv_cycles(1);
-        dec_ret!(self.reg.b);
+        self.reg.b = self.reg.b.wrapping_sub(1);
         self.jr_cond(self.reg.b != 0);
     }
     // TODO Clean up JR
@@ -621,7 +562,7 @@ impl Cpu {
         let hl = self.read8(self.get_pair(HL));
         self.write8(de as u16, hl as u8);
 
-        let n = hl + self.reg.a;
+        let n = hl.wrapping_add(self.reg.a);
 
         self.write_pair_direct(HL, self.get_pair(HL).wrapping_add(1));
         self.write_pair_direct(DE, self.get_pair(DE).wrapping_add(1));
@@ -668,15 +609,7 @@ impl Cpu {
     // Loads the value pointed to by ** into (REGPAIR)
     fn load_indirect(&mut self, reg: Register) {
         let word = self.read16(self.reg.pc);
-        match reg {
-            BC => self.write_pair_indirect(BC, word),
-            DE => self.write_pair_indirect(DE, word),
-            HL => self.write_pair_indirect(HL, word),
-            SP => self.write_pair_indirect(SP, word),
-            IX => self.write_pair_indirect(IX, word),
-            IY => self.write_pair_indirect(IY, word),
-            _ => unimplemented!(),
-        }
+        self.write_pair_direct(reg, self.read16(word));
         self.adv_cycles(20);
         self.adv_pc(4);
     }
@@ -746,36 +679,31 @@ impl Cpu {
         self.adv_pc(1);
     }
     fn cmp(&mut self, reg: Register) {
-        let value = match reg {
-            Register::A => self.reg.a,
-            Register::B => self.reg.b,
-            Register::C => self.reg.c,
-            Register::D => self.reg.d,
-            Register::E => self.reg.e,
-            Register::H => self.reg.h,
-            Register::L => self.reg.l,
-            Register::I => self.reg.i,
-            Register::R => self.reg.r,
-            Register::HL => {
-                self.adv_cycles(3);
-                self.memory[self.get_pair(Register::HL)]
-            }
-            _ => panic!("CMP not supported for register pairs"),
-        };
+        let mut value = 0;
+        if reg != HL {
+            value = self.read_reg(reg);
+        } else if reg == HL {
+            self.adv_cycles(3);
+            value = self.memory[self.get_pair(HL)];
+        }
         let result = (self.reg.a as u16).wrapping_sub(value as u16);
+        let overflow = (self.reg.a as i8).overflowing_sub(value as i8).1;
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_sub(self.reg.a, value as u8);
-        // self.flags.hf = self.carry_sub(3, a, result);
         self.flags.nf = true;
         // The XF & YF flags use the non compared value
         self.flags.yf = value & 0x20 != 0;
         self.flags.xf = value & 0x08 != 0;
-        // TODO CHECK OVERFLOW HERE
-        // self.flags.pf = self.overflow(value as u16, result);
-        self.flags.pf = self.carry(7, self.reg.a as u16, !value as u16)
-            != self.carry(8, self.reg.a as u16, !value as u16);
+        self.flags.pf = overflow;
+
+        /*if overflow
+            != (self.carry(7, self.reg.a as u16, !value as u16)
+                != self.carry(8, self.reg.a as u16, !value as u16))
+        {
+            println!("Overflow differs");
+        }*/
         self.flags.cf = result & 0x0100 != 0;
 
         self.adv_cycles(4);
@@ -786,13 +714,14 @@ impl Cpu {
     fn cp(&mut self) {
         let value = self.read8(self.reg.pc + 1);
         let result = (self.reg.a as i16).wrapping_sub(value as i16);
+        let overflow = (self.reg.a as i8).overflowing_sub(value as i8).1;
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.yf = value & 0x20 != 0;
         self.flags.hf = self.hf_sub(self.reg.a, value as u8);
         self.flags.xf = value & 0x08 != 0;
-        self.flags.pf = self.overflow(self.reg.a, result as u8);
+        self.flags.pf = overflow;
         self.flags.nf = true;
         self.flags.cf = result & 0x0100 != 0;
         // self.flags.pf = self.carry_sub(7, a, value, false) != self.carry_sub(8, a, value, false);
@@ -810,11 +739,13 @@ impl Cpu {
         // F5 is bit 1 of (A - (HL) - H), H as in F after instruction
         let value = self.read8(self.get_pair(HL));
         let result = (self.reg.a as u16).wrapping_sub(value as u16);
+        let overflow = (self.reg.a as i8).overflowing_sub(value as i8).1;
         self.flags.nf = true;
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_sub(self.reg.a, value);
-        self.flags.pf = self.overflow(value, result as u8);
+        // self.flags.pf = self.overflow(value, result as u8);
+        self.flags.pf = overflow;
         self.flags.cf = result & 0x0100 != 0;
         self.flags.yf = value & 0x20 != 0;
         self.flags.xf = value & 0x08 != 0;
@@ -822,28 +753,11 @@ impl Cpu {
 
     pub(crate) fn add_hl(&mut self, reg: Register) {
         let hl: u16 = self.get_pair(HL);
-        let (result, add) = match reg {
-            BC => (
-                ((self.get_pair(HL) as u32).wrapping_add(self.get_pair(BC) as u32)),
-                self.get_pair(BC),
-            ),
-            DE => (
-                ((self.get_pair(HL) as u32).wrapping_add(self.get_pair(DE) as u32)),
-                self.get_pair(DE),
-            ),
-            HL => (
-                ((self.get_pair(HL) as u32).wrapping_add(self.get_pair(HL) as u32)),
-                self.get_pair(HL),
-            ),
-            SP => (
-                ((self.get_pair(HL) as u32).wrapping_add(self.reg.sp as u32)),
-                self.get_pair(SP),
-            ),
-            _ => panic!("Register: {:?} Not allowed for ADD HL", reg),
-        };
-
-        self.reg.h = (result >> 8) as u8;
-        self.reg.l = result as u8;
+        let (result, add) = (
+            (self.get_pair(HL) as u32).wrapping_add(self.get_pair(reg) as u32),
+            self.get_pair(reg),
+        );
+        self.write_pair_direct(HL, result as u16);
         self.flags.cf = ((result >> 8) & 0x0100) != 0;
 
         // TODO Figure out why HF_ADD_W doesn't work here
@@ -863,30 +777,23 @@ impl Cpu {
         // If the H register contains 3AH, and the L register contains 7CH
         // and memory location 3A7CH contains 40H, the instruction:
         // DCR M will cause memory location 3A7CH to contain 3FH.
+        let mut result = 0;
 
-        let result = match reg {
-            A => dec_ret!(self.reg.a),
-            B => dec_ret!(self.reg.b),
-            C => dec_ret!(self.reg.c),
-            D => dec_ret!(self.reg.d),
-            E => dec_ret!(self.reg.e),
-            I => dec_ret!(self.reg.i),
-            H => dec_ret!(self.reg.h),
-            L => dec_ret!(self.reg.l),
-            HL | M => {
-                self.adv_cycles(5);
-                let hl = self.get_pair(Register::HL);
-                self.memory[hl] = self.memory[hl].wrapping_sub(1);
-                self.memory[hl]
-            }
-            _ => panic!("DEC on unknown reg:{:#?}", reg),
-        };
+        if reg == HL {
+            self.adv_cycles(5);
+            let hl = self.get_pair(HL);
+            self.memory[hl] = self.memory[hl].wrapping_sub(1);
+            result = self.memory[hl]
+        }
+        self.write_reg(reg, self.read_reg(reg).wrapping_sub(1));
+        result = self.read_reg(reg);
+
+        let overflow = (result as i8).wrapping_add(1).overflowing_sub(1).1;
+
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_sub(result.wrapping_add(1), 1);
-
-        self.flags.pf = self.carry(7, result.wrapping_add(1) as u16, !1_u16)
-            != self.carry(8, result.wrapping_add(1) as u16, !1_u16);
+        self.flags.pf = overflow;
         self.flags.nf = true;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -898,27 +805,12 @@ impl Cpu {
     // DEC register pair.
     // decrement! macro used for actual 16 bit registers for simplicity
     fn dex(&mut self, pair: Register) {
-        match pair {
-            BC => {
-                let value = self.get_pair(BC).wrapping_sub(1);
-                self.reg.b = (value >> 8) as u8;
-                self.reg.c = value as u8;
-            }
-            DE => {
-                let value = self.get_pair(DE).wrapping_sub(1);
-                self.reg.d = (value >> 8) as u8;
-                self.reg.e = value as u8;
-            }
-            HL => {
-                let value = self.get_pair(HL).wrapping_sub(1);
-                self.reg.h = (value >> 8) as u8;
-                self.reg.l = value as u8;
-            }
-            SP => self.reg.sp = self.reg.sp.wrapping_sub(1),
-            IX => self.reg.ix = self.reg.ix.wrapping_sub(1),
-            IY => self.reg.iy = self.reg.iy.wrapping_sub(1),
-            _ => panic!("DCX of normal registers not supported"),
-        };
+        self.write_pair_direct(pair, self.get_pair(pair).wrapping_sub(1));
+        if (pair == IX) || (pair == IY) {
+            self.adv_cycles(4);
+            self.adv_pc(1);
+        }
+
         if (pair == IY) || (pair == IX) {
             self.adv_cycles(4);
             self.adv_pc(1);
@@ -929,13 +821,6 @@ impl Cpu {
 
     // Double precision add
     fn daa(&mut self) {
-        // If C is set OR a > 0x99, add or subtract 0x60 depending on N, and set C
-        // If H is set OR (a & 0xf) > 9, add or subtract 6 depending on N
-        // H is set if bit 4 of A changed, otherwise cleared.
-        // C is set as described above; note that DAA never clears the C flag if it was already set
-        // (that would break multi-byte BCD arithmetic).
-        // N is preserved, and the rest of the flags are set the usual way (P/V is parity, not overflow)
-
         let mut offset = 0;
 
         if self.flags.hf || self.reg.a & 0x0F > 0x09 {
@@ -994,46 +879,31 @@ impl Cpu {
         self.adv_pc(1);
     }
     fn rrc(&mut self, reg: Register) {
-        let cf = self.flags.cf as u8;
-        let value = match reg {
-            A => rrc_ret!(self.reg.a, cf),
-            B => rrc_ret!(self.reg.b, cf),
-            C => rrc_ret!(self.reg.c, cf),
-            D => rrc_ret!(self.reg.d, cf),
-            E => rrc_ret!(self.reg.e, cf),
-            H => rrc_ret!(self.reg.h, cf),
-            L => rrc_ret!(self.reg.l, cf),
-            _ => panic!(),
-        };
-        let carry = value & 0x80 != 0;
+        self.write_reg(
+            reg,
+            (self.read_reg(reg) >> 1) | ((self.flags.cf as u8) << 7),
+        );
+        let value = self.read_reg(reg);
+
         self.flags.nf = false;
         self.flags.hf = false;
         self.flags.yf = value & 0x20 != 0;
         self.flags.xf = value & 0x08 != 0;
-        self.flags.cf = carry;
+        self.flags.cf = value & 0x80 != 0;
         self.parity(value);
         self.adv_pc(2);
         self.adv_cycles(8);
     }
     // Extended instruction 0xCB03
     fn rlc(&mut self, reg: Register) {
-        let cf = self.flags.cf as u8;
-        let value = match reg {
-            A => rlc_ret!(self.reg.a, cf),
-            B => rlc_ret!(self.reg.b, cf),
-            C => rlc_ret!(self.reg.c, cf),
-            D => rlc_ret!(self.reg.d, cf),
-            E => rlc_ret!(self.reg.e, cf),
-            H => rlc_ret!(self.reg.h, cf),
-            L => rlc_ret!(self.reg.l, cf),
-            _ => panic!(),
-        };
-        let carry = (value & 0x80) != 0;
+        self.write_reg(reg, (self.read_reg(reg) << 1) | ((self.flags.cf as u8) & 1));
+        let value = self.read_reg(reg);
+
         self.flags.nf = false;
         self.flags.hf = false;
         self.flags.yf = value & 0x20 != 0;
         self.flags.xf = value & 0x08 != 0;
-        self.flags.cf = carry;
+        self.flags.cf = value & 0x80 != 0;
         self.parity(value);
         self.adv_pc(2);
         self.adv_cycles(8);
@@ -1090,11 +960,11 @@ impl Cpu {
         // The MVI instruction uses a 8-bit data quantity, as opposed to
         // LXI which uses a 16-bit data quantity.
         let value = self.read8(self.reg.pc + 1);
-        if reg != Register::HL {
+        if reg != HL {
             self.write_reg(reg, value);
         } else {
             self.adv_cycles(3);
-            let hl = self.get_pair(Register::HL);
+            let hl = self.get_pair(HL);
             self.memory[hl] = value;
         }
         self.adv_cycles(7);
@@ -1103,8 +973,8 @@ impl Cpu {
 
     // LDA Load Accumulator direct
     fn lda_im(&mut self) {
-        let imm = self.read16(self.reg.pc + 1);
-        self.reg.a = self.memory[imm];
+        let addr = self.read16(self.reg.pc + 1);
+        self.reg.a = self.read8(addr);
         self.adv_cycles(13);
         self.adv_pc(3);
     }
@@ -1132,32 +1002,16 @@ impl Cpu {
         // This instruction copies the contents of that memory location into the
         // accumulator. The contents of either the register pair or the
         // memory location are not altered.
-
-        match reg {
-            BC => self.reg.a = self.memory[self.get_pair(BC)],
-            DE => self.reg.a = self.memory[self.get_pair(DE)],
-            HL => self.reg.a = self.memory[self.get_pair(HL)],
-            IX => self.reg.a = self.memory[self.get_pair(IX)],
-            IY => self.reg.a = self.memory[self.get_pair(IY)],
-            _ => panic!("LD on invalid register: {:?}", reg),
-        };
-
+        self.reg.a = self.memory[self.get_pair(reg)];
         self.adv_cycles(7);
         self.adv_pc(1);
     }
 
     fn lhld(&mut self) {
         // Load the HL register with 16 bits found at addr & addr + 1
-        // The byte at the memory address formed by concatenating HI ADD with LOW ADD
-        // replaces the contents of the L register.
-        // The byte at the next higher memory address replaces the contents of the H
-        // register.
-        // L <- (adr); H<-(adr+1)
         let imm = self.read16(self.reg.pc + 1);
-        self.reg.h = self.memory[imm + 1];
-        self.reg.l = self.memory[imm];
-
-        self.write_pair_indirect(Register::HL, self.read16(self.reg.pc + 1));
+        self.write_pair_direct(HL, imm);
+        self.write_pair_direct(HL, self.read16(imm));
         self.adv_cycles(16);
         self.adv_pc(3);
     }
@@ -1173,14 +1027,10 @@ impl Cpu {
 
     pub(crate) fn inc(&mut self, reg: Register) {
         let result = match reg {
-            A => inc_ret!(self.reg.a),
-            B => inc_ret!(self.reg.b),
-            C => inc_ret!(self.reg.c),
-            D => inc_ret!(self.reg.d),
-            E => inc_ret!(self.reg.e),
-            H => inc_ret!(self.reg.h),
-            L => inc_ret!(self.reg.l),
-            I => inc_ret!(self.reg.i),
+            A | B | C | D | E | H | L => {
+                self.write_reg(reg, self.read_reg(reg).wrapping_add(1));
+                self.read_reg(reg)
+            }
             HL => {
                 self.adv_cycles(5);
                 let hl = self.get_pair(Register::HL);
@@ -1189,12 +1039,12 @@ impl Cpu {
             }
             _ => unimplemented!("INC not implemented for:{:?}", reg),
         };
+        let overflow = (result as i8).wrapping_sub(1).overflowing_add(1).1;
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_add(result.wrapping_sub(1), 1);
-        self.flags.pf = self.carry(7, result.wrapping_sub(1) as u16, 1_u16)
-            != self.carry(8, result.wrapping_sub(1) as u16, 1_u16);
+        self.flags.pf = overflow;
         self.flags.nf = false;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -1204,31 +1054,10 @@ impl Cpu {
 
     fn inx(&mut self, reg: Register) {
         let value = self.get_pair(reg).wrapping_add(1);
-        match reg {
-            BC => {
-                self.reg.b = (value >> 8) as u8;
-                self.reg.c = (value & 0xFF) as u8;
-            }
-            DE => {
-                self.reg.d = (value >> 8) as u8;
-                self.reg.e = (value & 0xFF) as u8;
-            }
-            HL => {
-                self.reg.h = (value >> 8) as u8;
-                self.reg.l = (value & 0xFF) as u8;
-            }
-            SP => self.reg.sp = self.reg.sp.wrapping_add(1),
-            IX => {
-                self.reg.ix = self.reg.ix.wrapping_add(1);
-                self.adv_cycles(4);
-                self.adv_pc(1);
-            }
-            IY => {
-                self.reg.iy = self.reg.iy.wrapping_add(1);
-                self.adv_cycles(4);
-                self.adv_pc(1);
-            }
-            _ => panic!("INX on non implemented register:{:#?}", reg),
+        self.write_pair_direct(reg, value);
+        if (reg == IX) | (reg == IY) {
+            self.adv_cycles(4);
+            self.adv_pc(1);
         }
         self.adv_cycles(6);
         self.adv_pc(1);
@@ -1236,27 +1065,11 @@ impl Cpu {
 
     fn push(&mut self, reg: Register) {
         self.reg.sp = self.reg.sp.wrapping_sub(2);
-
-        match reg {
-            BC => self.write16(self.reg.sp, self.get_pair(BC)),
-            DE => self.write16(self.reg.sp, self.get_pair(DE)),
-            HL | H => self.write16(self.reg.sp, self.get_pair(HL)),
-            L => unimplemented!(),
-            R => unimplemented!(),
-            IY => {
-                self.write16(self.reg.sp, self.get_pair(IY));
-                self.adv_pc(1);
-                self.adv_cycles(4);
-            }
-            IX => {
-                self.write16(self.reg.sp, self.get_pair(IX));
-                self.adv_pc(1);
-                self.adv_cycles(4);
-            }
-            AF => self.write16(self.reg.sp, self.get_pair(AF)),
-            _ => panic!("Attempted Push on:{:#?}", reg),
+        self.write16(self.reg.sp, self.get_pair(reg));
+        if (reg == IY) | (reg == IX) {
+            self.adv_pc(1);
+            self.adv_cycles(4);
         }
-
         self.adv_cycles(11);
         self.adv_pc(1);
     }
@@ -1264,26 +1077,18 @@ impl Cpu {
     // Store the contents of the accumulator addressed by registers B, C
     // or by registers D and E.
     fn stax(&mut self, reg: Register) {
-        match reg {
-            BC => self.write8(self.get_pair(BC), self.reg.a),
-            DE => self.write8(self.get_pair(DE), self.reg.a),
-            HL => self.write8(self.get_pair(HL), self.reg.a),
-            IX => unimplemented!(),
-            IY => unimplemented!(),
-            SP => eprintln!("STAX should not run on SP register"),
-            _ => unimplemented!("STAX not implemented for:{:?}", reg),
-        }
+        self.write8(self.get_pair(reg), self.reg.a);
         self.adv_cycles(7);
         self.adv_pc(1);
     }
 
     // SBC Subtract Register or Memory from Accumulator with carry flag
     fn sbc(&mut self, reg: Register) {
-        let value = if reg != Register::HL {
+        let value = if reg != HL {
             self.read_reg(reg)
         } else {
             self.adv_cycles(3);
-            self.memory[self.get_pair(Register::HL)]
+            self.memory[self.get_pair(HL)]
         };
 
         let result = (self.reg.a as u16)
@@ -1292,10 +1097,7 @@ impl Cpu {
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
-
         self.flags.hf = self.hf_sub(self.reg.a, value as u8);
-        /*self.flags.hf =
-            (self.reg.a as i8 & 0x0F) - (value as i8 & 0x0F) - (self.flags.cf as i8) >= 0;*/
         self.flags.pf = self.overflow(value, result as u8);
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -1312,11 +1114,12 @@ impl Cpu {
         let imm = self.read8(self.reg.pc + 1);
         let value = imm + self.flags.cf as u8;
         let result = (self.reg.a as u16).wrapping_sub(value as u16);
+        let overflow = (self.reg.a as i8).overflowing_sub(value as i8).1;
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_sub(self.reg.a, value as u8);
-        self.flags.pf = self.overflow(imm, result as u8);
+        self.flags.pf = overflow;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
         self.flags.nf = true;
@@ -1329,23 +1132,24 @@ impl Cpu {
 
     // SUB Subtract Register or Memory From Accumulator
     fn sub(&mut self, reg: Register) {
-        let value = if reg != Register::HL {
+        let value = if reg != HL {
             self.read_reg(reg)
         } else {
             self.adv_cycles(3);
-            self.memory[self.get_pair(Register::HL)]
+            self.memory[self.get_pair(HL)]
         };
-        if reg == Register::IX || reg == Register::IY {
+        if (reg == IX) | (reg == IY) {
             self.adv_pc(1);
             self.adv_cycles(4);
         }
 
         let result = (self.reg.a as u16).wrapping_sub(value as u16);
+        let overflow = (self.reg.a as i8).overflowing_sub(value as i8).1;
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_sub(self.reg.a, value);
-        self.flags.pf = self.overflow(self.reg.a, result as u8);
+        self.flags.pf = overflow;
         self.flags.nf = true;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -1360,11 +1164,13 @@ impl Cpu {
     fn sui(&mut self) {
         let value = self.read8(self.reg.pc + 1);
         let result = (self.reg.a as u16).wrapping_sub(value as u16);
+        let overflow = (self.reg.a as i8).overflowing_sub(value as i8).1;
 
         self.flags.sf = result & 0x80 != 0;
         self.flags.zf = result & 0xFF == 0;
         self.flags.hf = self.hf_sub(self.reg.a, value as u8);
         self.flags.pf = self.overflow(value, result as u8);
+        self.flags.pf = overflow;
         self.flags.nf = true;
         self.flags.yf = result & 0x20 != 0;
         self.flags.xf = result & 0x08 != 0;
@@ -1388,11 +1194,11 @@ impl Cpu {
 
     // XRA Logical Exclusive-Or memory with Accumulator (Zero accumulator)
     fn xra(&mut self, reg: Register) {
-        let value = if reg != Register::HL {
+        let value = if reg != HL {
             self.read_reg(reg)
         } else {
             self.adv_cycles(3);
-            self.memory[self.get_pair(Register::HL)]
+            self.memory[self.get_pair(HL)]
         };
 
         let result = self.reg.a as u16 ^ value as u16;
@@ -1475,65 +1281,25 @@ impl Cpu {
         // Swap H:L with top word on stack
         let hl = self.get_pair(Register::HL) as u16;
         let new_hl = self.read16(self.reg.sp);
-
         // Write old HL values to memory
         self.write16(self.reg.sp, hl);
-        self.reg.h = (new_hl >> 8) as u8;
-        self.reg.l = new_hl as u8;
+        self.write_pair_direct(HL, new_hl);
         self.adv_cycles(19);
         self.adv_pc(1);
     }
 
     fn pop(&mut self, reg: Register) {
-        let hb = self.read8(self.reg.sp + 1);
-        let lb = self.read8(self.reg.sp);
+        let value = self.read16(self.reg.sp);
 
-        match reg {
-            BC => {
-                self.reg.c = lb;
-                self.reg.b = hb;
-            }
-            DE => {
-                self.reg.e = lb;
-                self.reg.d = hb;
-            }
-            HL => {
-                self.reg.l = lb;
-                self.reg.h = hb;
-            }
-            IX => {
-                let hb = hb as u16;
-                let lb = lb as u16;
-                self.reg.ix = hb << 8 | lb;
-                self.adv_pc(1);
-                self.adv_cycles(4);
-            }
-            IY => {
-                let hb = hb as u16;
-                let lb = lb as u16;
-                self.reg.iy = hb << 8 | lb;
-                self.adv_pc(1);
-                self.adv_cycles(4);
-            }
-            AF => {
-                self.flags.set(lb);
-                self.reg.a = hb;
-            }
-            _ => panic!("Attempted to pop unknown register:{:?}", reg),
-        }
+        self.write_pair_direct(reg, value);
         self.reg.sp = self.reg.sp.wrapping_add(2);
 
+        if (reg == IX) | (reg == IY) {
+            self.adv_cycles(4);
+            self.adv_pc(1);
+        }
         self.adv_pc(1);
         self.adv_cycles(10);
-    }
-
-    fn pop_stack(&mut self) -> u16 {
-        let sp = self.read16(self.reg.sp + 1);
-        if self.debug {
-            println!("Popping stack. SP value: {:04X}", sp);
-        }
-        self.reg.sp += 2;
-        sp
     }
 
     fn ret(&mut self) {
@@ -1555,11 +1321,11 @@ impl Cpu {
     }
     // TODO: Consolidate ORA & ORI (pass value directly)
     fn ora(&mut self, reg: Register) {
-        let value = if reg != Register::HL {
+        let value = if reg != HL {
             self.read_reg(reg)
         } else {
             self.adv_cycles(3);
-            self.memory[self.get_pair(Register::HL)]
+            self.memory[self.get_pair(HL)]
         };
 
         let result = self.reg.a as u16 | value as u16;
@@ -1595,34 +1361,23 @@ impl Cpu {
         self.adv_cycles(7);
         self.adv_pc(2);
     }
-    // TODO Refactor
+
     fn ld(&mut self, dst: Register, src: Register) {
         // let value =  self.read_reg(src);
-        let value: u16 = match src {
-            A => u16::from(self.reg.a),
-            B => u16::from(self.reg.b),
-            C => u16::from(self.reg.c),
-            D => u16::from(self.reg.d),
-            E => u16::from(self.reg.e),
-            H => u16::from(self.reg.h),
-            L => u16::from(self.reg.l),
-            I => u16::from(self.reg.i),
-            R => u16::from(self.reg.r),
-            HL => self.get_pair(HL),
-            DE => self.get_pair(DE),
-            BC => self.get_pair(BC),
+        let mut value: u16 = match src {
+            A | B | C | D | E | H | L | I | R => u16::from(self.read_reg(src)),
+            BC | DE | HL => self.get_pair(src),
             _ => panic!("Non handled LD source"),
         };
 
         let addr = self.get_pair(Register::HL) as u16;
 
         match dst {
-            A => {
-                if src == Register::HL {
-                    self.reg.a = self.read8(addr);
+            A | B | C | D | E | H | L => {
+                if src == HL {
+                    value = self.read8(addr) as u16;
                     self.adv_cycles(3);
-                } else if (src == R) || (src == I) {
-                    self.write_reg(dst, value as u8);
+                } else if (src == R) | (src == I) {
                     self.flags.sf = (self.reg.a & 0x80) != 0;
                     self.flags.zf = (self.reg.a & 0xFF) == 0;
                     // TODO PF interrupt interrupt handling
@@ -1631,91 +1386,22 @@ impl Cpu {
                     self.flags.nf = false;
                     self.adv_cycles(5);
                     self.adv_pc(1);
-                } else {
-                    self.write_reg(dst, value as u8)
                 }
-            }
-            B => {
-                if src == Register::HL {
-                    self.reg.b = self.read8(addr);
-                    self.adv_cycles(3);
-                } else {
-                    self.write_reg(dst, value as u8);
-                }
-            }
-            C => {
-                if src == Register::HL {
-                    self.reg.c = self.read8(addr);
-                    self.adv_cycles(3);
-                } else {
-                    self.write_reg(dst, value as u8);
-                }
-            }
-            D => {
-                if src == Register::HL {
-                    self.reg.d = self.read8(addr);
-                    self.adv_cycles(3);
-                } else {
-                    self.write_reg(dst, value as u8);
-                }
-            }
-            E => {
-                if src == Register::HL {
-                    self.reg.e = self.read8(addr);
-                    self.adv_cycles(3);
-                } else {
-                    self.write_reg(dst, value as u8);
-                }
-            }
-            H => {
-                if src == Register::HL {
-                    self.reg.h = self.read8(addr);
-                    self.adv_cycles(3);
-                } else {
-                    self.write_reg(dst, value as u8);
-                }
-            }
-            L => {
-                if src == Register::HL {
-                    self.reg.l = self.read8(addr);
-                    self.adv_cycles(3);
-                } else {
-                    self.write_reg(dst, value as u8);
-                }
-            }
-            HL => {
-                self.memory[addr] = self.read_reg(src);
-                match src {
-                    A => self.reg.a = self.memory[self.get_pair(HL)],
-                    B => self.reg.b = self.memory[self.get_pair(HL)],
-                    C => self.reg.c = self.memory[self.get_pair(HL)],
-                    D => self.reg.d = self.memory[self.get_pair(HL)],
-                    E => self.reg.e = self.memory[self.get_pair(HL)],
-                    H => self.reg.h = self.memory[self.get_pair(HL)],
-                    L => self.reg.l = self.memory[self.get_pair(HL)],
-                    _ => panic!(
-                        "LD (HL), REG on non implemented reg. src:{:?}, dst:{:?}",
-                        src, dst
-                    ),
-                }
-                self.adv_cycles(3);
-            }
-            I => {
-                if src == Register::HL {
-                    self.reg.i = self.read8(addr);
-                    self.adv_cycles(2);
-                }
-                self.adv_cycles(5);
-                self.adv_pc(1);
                 self.write_reg(dst, value as u8);
             }
-            R => {
-                if src == Register::HL {
-                    self.reg.r = self.read8(addr);
+
+            HL => {
+                self.memory[addr] = self.read_reg(src);
+                self.write_reg(src, self.memory[self.get_pair(HL)]);
+                self.adv_cycles(3);
+            }
+            I | R => {
+                if src == HL {
+                    self.write_reg(src, self.read8(addr));
                     self.adv_cycles(2);
                 }
-                self.adv_pc(1);
                 self.adv_cycles(5);
+                self.adv_pc(1);
                 self.write_reg(dst, value as u8);
             }
             _ => panic!("Unhandled LD register"),
@@ -1748,7 +1434,7 @@ impl Cpu {
     }
 
     fn sphl(&mut self) {
-        self.reg.sp = self.get_pair(Register::HL) as u16;
+        self.reg.sp = self.get_pair(HL) as u16;
         self.adv_cycles(6);
         self.adv_pc(1);
     }
@@ -1756,7 +1442,7 @@ impl Cpu {
     // Store H & L direct
     fn shld(&mut self) {
         let addr = self.read16(self.reg.pc + 1);
-        let hl = self.get_pair(Register::HL) as u16;
+        let hl = self.get_pair(HL) as u16;
         self.write16(addr, hl);
         self.adv_cycles(16);
         self.adv_pc(3);
@@ -1790,6 +1476,7 @@ impl Cpu {
         }
 
         self.reg.r = (self.reg.r & 0x80) | (self.reg.r.wrapping_add(1)) & 0x7f;
+
         match opcode {
             0x00 => self.nop(),
             0x01 => self.lxi(BC),
@@ -1934,7 +1621,6 @@ impl Cpu {
             0x7B => self.ld(A, E),
             0x7C => self.ld(A, H),
             0x7D => self.ld(A, L),
-            // TODO: MOV (A,M) / LD(A,HL) works?
             0x7E => self.ld_ex(HL),
             0x7F => self.ld(A, A),
 
@@ -2317,7 +2003,7 @@ impl Cpu {
         if self.int.nmi_pending && self.int.int {
             self.int.nmi_pending = false;
             self.int.iff1 = false;
-            inc_ret!(self.reg.r);
+            self.reg.r = self.reg.r.wrapping_add(1);
             self.adv_cycles(11);
             self.call(0x66);
             return;
@@ -2326,7 +2012,7 @@ impl Cpu {
             self.int_pending = false;
             self.int.iff1 = false;
             self.int.iff2 = false;
-            inc_ret!(self.reg.r);
+            self.reg.r = self.reg.r.wrapping_add(1);
         }
         // Interrupt Mode 0 is the 8080 compatibility mode
         // Most commonly the instruction executed on the bus is RST,

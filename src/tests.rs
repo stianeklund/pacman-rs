@@ -5,7 +5,7 @@ mod tests {
     use crate::interconnect::Interconnect;
     use crate::memory::MemoryRW;
 
-    // #[test]
+    #[test]
     fn test_hf_flag() {
         // Make sure HF flag gets set on accumulator value wrap from FFh to 00h.
         let mut i = Interconnect::new();
@@ -14,7 +14,7 @@ mod tests {
         assert_eq!(i.cpu.flags.hf, true);
     }
 
-    // #[test]
+    #[test]
     fn test_hf_high_byte() {
         // The half carry flag should be set once we increment HL from 00FFh to 0000h
         let mut i = Interconnect::new();
