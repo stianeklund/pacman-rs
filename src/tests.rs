@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::instruction_info::Register;
-    use crate::instruction_info::Register::{BC, HL};
+    use crate::instruction_info::Register::{BC, DE, HL};
     use crate::interconnect::Interconnect;
     use crate::memory::MemoryRW;
 
@@ -62,11 +62,11 @@ mod tests {
         // Inject IN, A * to store BDOS output
         // If successful it should return to 0x0007.
 
-        i.cpu.memory.ram[0x0000] = 0xD3;
-        i.cpu.memory.ram[0x0001] = 0x00;
-        i.cpu.memory.ram[0x0005] = 0xDB;
-        i.cpu.memory.ram[0x0006] = 0x00;
-        i.cpu.memory.ram[0x0007] = 0xC9;
+        i.cpu.memory.rom[0x0000] = 0xD3;
+        i.cpu.memory.rom[0x0001] = 0x00;
+        i.cpu.memory.rom[0x0005] = 0xDB;
+        i.cpu.memory.rom[0x0006] = 0x00;
+        i.cpu.memory.rom[0x0007] = 0xC9;
 
         // All test binaries start at 0x0100.
         i.cpu.reg.pc = 0x0100;
@@ -82,9 +82,9 @@ mod tests {
 
             if i.cpu.reg.pc == 07 {
                 if i.cpu.reg.c == 9 {
-                    let mut de = (i.cpu.reg.d as u16) << 8 | (i.cpu.reg.e as u16);
+                    let mut de = i.cpu.get_pair(DE);
                     'print: loop {
-                        let output = i.cpu.memory.ram[de as usize];
+                        let output = i.cpu.memory.rom[de as usize];
                         if output as char == '$' {
                             break 'print;
                         } else if output as char != '$' {
@@ -99,8 +99,12 @@ mod tests {
             }
 
             if i.cpu.reg.pc == 0 {
-                println!(" Jump to 0 from {:04X}", i.cpu.reg.prev_pc);
-                println!("Cycles executed: {}", i.cpu.cycles);
+                println!(
+                    "\nBDOS routine called, jumped to: 0 from {:04X}",
+                    i.cpu.reg.prev_pc
+                );
+                println!("Cycles executed: {}\n", i.cpu.cycles);
+                println!();
                 break;
             }
         }

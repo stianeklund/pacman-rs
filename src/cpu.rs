@@ -3,9 +3,10 @@ use crate::memory::{Memory, MemoryRW};
 
 #[derive(Default)]
 pub struct Io {
-    pub port0: u8,
-    pub in0: u8,
-    pub in1: u8,
+    pub port: u8,
+    pub value: u8,
+    input: bool,
+    output: bool,
 }
 
 #[derive(Default, Debug)]
@@ -37,12 +38,14 @@ pub struct Flags {
 #[derive(Default, Debug)]
 pub struct Interrupt {
     pub irq: bool,
+    pub vector: u8,
     pub nmi_pending: bool,
     pub nmi: bool,
     pub int: bool,
     pub iff1: bool,
     pub iff2: bool,
     pub mode: u8,
+    pub data: u8,
 }
 
 pub struct Cpu {
@@ -90,32 +93,6 @@ pub struct Registers {
     pub sp: u16,
     pub ix: u16,
     pub iy: u16,
-}
-
-impl Registers {
-    // Swaps the value between the normal registers and shadow registers
-    fn swap(&mut self) {
-        let b = self.b;
-        let c = self.c;
-        let d = self.d;
-        let e = self.e;
-        let h = self.h;
-        let l = self.l;
-
-        self.b = self.b_;
-        self.c = self.c_;
-        self.d = self.d_;
-        self.e = self.e_;
-        self.h = self.h_;
-        self.l = self.l_;
-
-        self.b_ = b;
-        self.c_ = c;
-        self.d_ = d;
-        self.e_ = e;
-        self.h_ = h;
-        self.l_ = l;
-    }
 }
 
 impl Flags {
@@ -190,7 +167,15 @@ impl Flags {
 
 impl MemoryRW for Cpu {
     fn read8(&self, addr: u16) -> u8 {
-        self.memory[addr]
+        if addr < 0x4000 {
+            self.memory[addr]
+        } else if addr == 0x5000 {
+            return self.int.int as u8;
+        } else if addr < 0x5000 {
+            self.memory.ram[addr as usize - 0x4000]
+        } else {
+            self.memory.ram[addr as usize]
+        }
     }
     fn read16(&self, addr: u16) -> u16 {
         u16::from_le_bytes([self.read8(addr), self.read8(addr + 1)])
@@ -201,9 +186,19 @@ impl MemoryRW for Cpu {
         self.write8(addr.wrapping_add(1), (word >> 8) as u8);
     }
     fn write8(&mut self, addr: u16, byte: u8) {
-        self.memory[addr & 0xFFFF] = byte
+        if addr < 0x4000 {
+            self.memory.ram[addr as usize] = byte
+        } else if addr < 0x5000 {
+            self.memory.ram[addr as usize - 0x4000] = byte;
+        } else if addr == 0x5000 {
+            self.int_pending = true;
+            self.int.irq = true;
+        } else {
+            self.memory.ram[addr as usize] = byte;
+        }
     }
 }
+
 impl Cpu {
     pub fn new() -> Cpu {
         Cpu {
@@ -266,7 +261,7 @@ impl Cpu {
             M => self.reg.m = value,
             I => self.reg.i = value,
             R => self.reg.r = value,
-            _ => panic!("Writing to register pairs is not supported by write_reg"),
+            _ => panic!(format!("Writing to register pairs is not supported by write_reg, called by: {}, opcode:{:02x}", self.current_instruction, self.opcode)),
         }
     }
 
@@ -346,7 +341,7 @@ impl Cpu {
         self.adv_pc(1);
     }
     fn adc_hl(&mut self, reg: Register) {
-        let mut result = match reg {
+        let result = match reg {
             BC => (self.get_pair(HL) as u32)
                 .wrapping_add(self.get_pair(BC) as u32)
                 .wrapping_add(self.flags.cf as u32),
@@ -586,11 +581,8 @@ impl Cpu {
             self.reg.pc = self.reg.pc.wrapping_sub(2);
             self.adv_cycles(5);
         }
-        // TODO This is wrong, gives value 7Fh twice before wrapping to 00, should be 7Fh -> 01h?
         if self.get_pair(BC) <= 0 {
             self.reg.r = (self.reg.r & 0x80) | (self.reg.r.wrapping_add(0) as u8 & 0x7f);
-            /*self.reg.r = (self.reg.r & 0x80)
-            | (self.reg.r.wrapping_add(255_u8.wrapping_mul(2)) as u8 & 0x7f);*/
         }
     }
 
@@ -622,6 +614,7 @@ impl Cpu {
         self.adv_pc(3);
     }
 
+    // LD (**, A)
     // Store Accumulator direct
     fn sta(&mut self) {
         let imm = self.read16(self.reg.pc + 1);
@@ -779,7 +772,7 @@ impl Cpu {
         // DCR M will cause memory location 3A7CH to contain 3FH.
         let mut result = 0;
 
-        if reg == HL {
+        if (reg == HL) || (reg == M) {
             self.adv_cycles(5);
             let hl = self.get_pair(HL);
             self.memory[hl] = self.memory[hl].wrapping_sub(1);
@@ -851,6 +844,7 @@ impl Cpu {
     }
 
     fn set_interrupt_mode(&mut self, mode: u8) {
+        println!("Setting interrupt mode 2");
         self.int.mode = mode;
         self.adv_cycles(8);
         self.adv_pc(2);
@@ -858,6 +852,12 @@ impl Cpu {
     // EI & DI instructions
     fn interrupt(&mut self, value: bool) {
         self.int.int = value;
+        if value {
+            self.int.irq = true;
+        } else if !value {
+            self.int.iff1 = false;
+            self.int.iff2 = false;
+        }
         self.adv_cycles(4);
         self.adv_pc(1);
     }
@@ -1014,15 +1014,6 @@ impl Cpu {
         self.write_pair_direct(HL, self.read16(imm));
         self.adv_cycles(16);
         self.adv_pc(3);
-    }
-
-    fn in_(&mut self, _reg: Register) {
-        // TODO: handle other registers than A
-        let port = self.read8(self.reg.pc + 1);
-        self.io.port0 = port;
-        self.reg.a = 0xFF;
-        self.adv_cycles(11);
-        self.adv_pc(2);
     }
 
     pub(crate) fn inc(&mut self, reg: Register) {
@@ -1313,9 +1304,30 @@ impl Cpu {
         self.adv_cycles(10);
     }
 
-    // TODO: Implement
-    fn out(&mut self) {
+    // Extended opcode
+    fn in_c(&mut self, reg: Register) {
+        self.write_reg(reg, self.reg.c);
+        self.flags.zf = self.read_reg(reg) == 0;
+        self.flags.hf = false;
+        self.flags.nf = false;
+        self.flags.pf = self.parity(self.read_reg(reg));
+        self.adv_cycles(12);
+        self.adv_pc(2);
+    }
+    fn in_a(&mut self) {
+        self.io.port = self.read8(self.reg.pc + 1);
+        self.reg.a = self.io.port;
+        self.adv_cycles(11);
+        self.adv_pc(2);
+    }
+
+    fn out(&mut self, reg: Register) {
+        // Set port:
         let port = self.read8(self.reg.pc + 1);
+        if self.debug {
+            println!("Out port: {:02x}, value: {:02x}", port, self.read_reg(reg));
+        }
+        self.io.port = self.read_reg(reg);
         self.adv_cycles(11);
         self.adv_pc(2);
     }
@@ -1537,7 +1549,7 @@ impl Cpu {
             0x32 => self.sta(),
             0x33 => self.inx(SP),
             0x34 => self.inc(HL),
-            0x35 => self.dec(HL),
+            0x35 => self.dec(M),
             0x36 => self.mvi(HL),
             0x37 => self.scf(),
             0x38 => self.jr_cond(self.flags.cf), // JR C, *
@@ -1733,7 +1745,7 @@ impl Cpu {
             0xD0 => self.ret_cond(!self.flags.cf),
             0xD1 => self.pop(DE),
             0xD2 => self.jp_cond(!self.flags.cf),
-            0xD3 => self.out(),
+            0xD3 => self.out(A),
             0xD4 => self.call_cond(0xD4, !self.flags.cf),
             0xD5 => self.push(DE),
             0xD6 => self.sui(),
@@ -1741,7 +1753,7 @@ impl Cpu {
             0xD8 => self.ret_cond(self.flags.cf),
             0xD9 => self.exx(),
             0xDA => self.jp_cond(self.flags.cf),
-            0xDB => self.in_(A),
+            0xDB => self.in_a(),
             0xDC => self.call_cond(0xDC, self.flags.cf),
             0xDD => {
                 self.opcode = self.read8(self.reg.pc + 1) as u16;
@@ -1824,13 +1836,16 @@ impl Cpu {
                 self.opcode = self.read8(self.reg.pc + 1) as u16;
                 self.reg.r = (self.reg.r & 0x80) | (self.reg.r.wrapping_add(1)) & 0x7f;
                 match self.opcode {
+                    0x08 => self.in_c(C),
                     0xA0 => self.ldi(),
                     0xA1 => self.cpi(),
                     0xB0 => self.ldir(),
                     0x43 => self.ld_nn(BC),
                     0x46 => self.set_interrupt_mode(0),
                     0x47 => self.ld(I, A),
+                    0x50 => self.in_c(D),
                     0x53 => self.ld_nn(DE),
+                    0x5E => self.set_interrupt_mode(2),
                     0x56 => self.set_interrupt_mode(1),
                     0x57 => self.ld(A, I),
                     0x63 => self.ld_nn(HL),
@@ -1938,7 +1953,7 @@ impl Cpu {
 
     // TODO interrupt handle
     fn hlt(&mut self) {
-        if self.int_pending && self.int.int {
+        if self.int.irq && self.int.int {
             ::std::process::exit(1);
         }
         eprintln!("Halting CPU");
@@ -1992,15 +2007,15 @@ impl Cpu {
         let op = self.read8(self.reg.pc + 1);
         ((a >> 7) == (op.wrapping_shl(7))) && ((a.wrapping_shr(7)) != (result.wrapping_shr(7)))
     }
-    pub(crate) fn handle_interrupts(&mut self, mut delay: u8) {
-        if delay > 0 {
-            delay -= 1;
+    pub fn generate_interrupt(&mut self) {
+        self.int.nmi_pending = true;
+        if self.io.port == 0 {
+            self.int.data = self.io.port;
         }
-        if delay == 0 {
-            self.int.iff1 = true;
-            self.int.iff2 = true;
-        }
-        if self.int.nmi_pending && self.int.int {
+    }
+    pub(crate) fn poll_interrupt(&mut self) {
+        // Accepting an NMI
+        if self.int.nmi_pending {
             self.int.nmi_pending = false;
             self.int.iff1 = false;
             self.reg.r = self.reg.r.wrapping_add(1);
@@ -2008,36 +2023,44 @@ impl Cpu {
             self.call(0x66);
             return;
         }
-        if self.int_pending && self.int.iff1 {
+        if (self.int.nmi_pending || self.int.irq) || self.int.iff1 {
             self.int_pending = false;
             self.int.iff1 = false;
             self.int.iff2 = false;
-            self.reg.r = self.reg.r.wrapping_add(1);
-        }
-        // Interrupt Mode 0 is the 8080 compatibility mode
-        // Most commonly the instruction executed on the bus is RST,
-        // but it can be any instruction (technically)
-        // The I register is not used for IM0
-        match self.int.mode {
-            0 => {
-                self.adv_cycles(11);
-                self.decode(0xFA);
-            }
-            1 => {
-                // Mode 1, RST38h, regardless of bus value or I reg value.
-                self.adv_cycles(13);
-                self.rst(7)
-            }
-            2 => {
-                // Call made to the address read from memory.
-                // address to be read from is calculated:
-                // self.reg.i * 256 + busvalue
-                self.adv_cycles(19);
+            self.reg.r = (self.reg.r & 0x80) | (self.reg.r.wrapping_add(0) as u8 & 0x7f);
 
-                // so the MSB (8 bits) of the address, and the interrupt data as the LSB 8 bits
-                self.call(self.read16((self.reg.i).wrapping_shl(8) as u16) | 0xFC)
+            // Interrupt Mode 0 is the 8080 compatibility mode
+            // Most commonly the instruction executed on the bus is RST,
+            // but it can be any instruction (technically)
+            // The I register is not used for IM0
+            match self.int.mode {
+                0 => {
+                    self.adv_cycles(11);
+                    println!("INT VECTOR {:04x}", self.int.vector);
+                    println!("INT Data {:04x}", self.int.data);
+                    self.decode(self.int.data as u16);
+                }
+                1 => {
+                    // Mode 1, RST38h, regardless of bus value or I reg value.
+                    self.adv_cycles(13);
+                    self.rst(7);
+                    println!("Interrupt mode 1");
+                }
+                2 => {
+                    // self.reg.i * 256 + busvalue
+                    self.adv_cycles(19);
+                    let addr =
+                        self.read16((self.reg.i).wrapping_shl(8) as u16) | self.int.vector as u16;
+                    let ret: u16 = self.reg.pc.wrapping_add(3);
+                    self.memory[self.reg.sp.wrapping_sub(1)] = (ret >> 8) as u8;
+                    self.memory[self.reg.sp.wrapping_sub(2)] = ret as u8;
+                    self.reg.sp = self.reg.sp.wrapping_sub(2);
+
+                    self.reg.prev_pc = self.reg.pc;
+                    self.reg.pc = addr;
+                }
+                _ => panic!("Unhandled interrupt mode"),
             }
-            _ => {}
         }
     }
 

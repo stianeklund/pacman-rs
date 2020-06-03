@@ -1,23 +1,23 @@
-use std::borrow::Borrow;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
 use crate::interconnect::Interconnect;
-use crate::memory::Memory;
-use crate::pacman::display;
 use crate::pacman::display::Display;
 
 pub struct Pacman {
-    int_vector: u8,
-    int_enable: bool,
-    port_in: u8,
-    port_out: u8,
-    ram: Vec<u8>,
-    ctx: Interconnect,
-    fb: Display,
-    dip: Dip,
-    in0: IN0,
-    in1: IN1,
-    c_lockout: bool,
-    c_counter: bool,
+    pub int_vector: u8,
+    pub int_enable: bool, // Vblank or CPU interrupt
+    pub port_in: u8,
+    pub port_out: u8,
+    pub ram: Vec<u8>,
+    pub ctx: Interconnect,
+    pub fb: Display,
+    pub dip: Dip,
+    pub in0: IN0,
+    pub in1: IN1,
+    pub c_lockout: bool,
+    pub c_counter: bool,
 }
 
 #[derive(Default)]
@@ -44,9 +44,17 @@ pub struct IN1 {
     joy_right: bool,
     joy_down: bool,
 }
+enum Map {
+    SpriteRom,
+    ColorRom,
+    PaletteRom,
+    TileRom,
+    Rom,
+    Ram,
+}
 
 impl Pacman {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             int_vector: 0,
             int_enable: false,
@@ -62,7 +70,87 @@ impl Pacman {
             c_counter: false,
         }
     }
+
+    fn load(&mut self, file: &mut File, map: Map, offset: usize) {
+        match map {
+            Map::SpriteRom => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+                for i in 0..buf.len() {
+                    self.fb.sprite_rom[i + offset] = buf[i];
+                }
+            }
+            Map::ColorRom => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+                for i in 0..buf.len() {
+                    self.fb.color_rom[i + offset] = buf[i];
+                }
+            }
+            Map::TileRom => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+                for i in 0..buf.len() {
+                    self.fb.tile_rom[i + offset] = buf[i];
+                }
+            }
+            Map::PaletteRom => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+                for i in 0..buf.len() {
+                    self.fb.palette_rom[i + offset] = buf[i];
+                }
+            }
+            Map::Rom => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+                for i in 0..buf.len() {
+                    self.ctx.cpu.memory.rom[i + offset] = buf[i];
+                }
+            }
+            Map::Ram => {
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).unwrap();
+                for i in 0..buf.len() {
+                    self.ctx.cpu.memory.ram[i + offset] = buf[i];
+                }
+            }
+        }
+    }
+    pub fn load_rom(&mut self, rom: &Vec<String>) {
+        let mut collection: Vec<&str> = Vec::new();
+
+        // Skip the target directory and use provided args
+        for i in rom.iter().skip(1) {
+            collection.push(&i);
+        }
+        for y in collection.iter() {
+            let path = Path::new(y);
+
+            if path.is_dir() {
+                let rom = path.read_dir().unwrap();
+                for entry in rom {
+                    let f = entry.unwrap();
+                    let mut file = File::open(f.path().as_path()).unwrap();
+
+                    match f.file_name().to_str().unwrap() {
+                        "82s123.7f" => self.load(&mut file, Map::ColorRom, 0),
+                        "82s16.4a" => self.load(&mut file, Map::PaletteRom, 0),
+                        "pacman.6e" => self.load(&mut file, Map::Rom, 0),
+                        "pacman.6f" => self.load(&mut file, Map::Rom, 0x1000),
+                        "pacman.6h" => self.load(&mut file, Map::Rom, 0x2000),
+                        "pacman.6j" => self.load(&mut file, Map::Rom, 0x3000),
+                        "pacman.5e" => self.load(&mut file, Map::TileRom, 0),
+                        "pacman.5f" => self.load(&mut file, Map::SpriteRom, 0),
+                        _ => {}
+                    };
+                }
+                println!("Found and loaded rom files");
+            }
+        }
+    }
 }
+
 // Mapper trait for the Pacman hardware
 pub trait Mapper {
     fn read(&self, addr: u16) -> u8;
@@ -72,10 +160,13 @@ pub trait Mapper {
 impl Mapper for Pacman {
     fn read(&self, addr: u16) -> u8 {
         match addr {
-            0x0000..=0x3FFF => self.ctx.cpu.memory.ram[addr as usize],
-            0x4000..=0x4FFF => self.ram[addr as usize],
+            0x0000..=0x3FFF => self.ctx.cpu.memory.rom[addr as usize],
+            0x4000..=0x43FF => self.fb.tile_rom[addr as usize],
+            0x4400..=0x47FF => self.fb.tile_rom[addr as usize],
+            0x4800..=0x4FEF => self.fb.vram[addr as usize],
+            0x4FF0..=0x4FFF => self.fb.sprite_rom[addr as usize],
             0x5000 => self.int_enable as u8,
-            0x5006 => self.ctx.cpu.memory.ram[addr as usize],
+            0x5006 => self.ctx.cpu.memory.rom[addr as usize],
             0x5040..=0x507F => unimplemented!(), // self.in0 // Joystick and start buttons
             _ => unimplemented!(),
         }
@@ -83,7 +174,10 @@ impl Mapper for Pacman {
 
     fn write(&mut self, addr: u16, byte: u8) {
         match addr {
-            0x4000..=0x4FFF => self.ram[addr as usize] = byte,
+            0x4000..=0x43FF => self.fb.tile_rom[addr as usize] = byte,
+            0x4400..=0x47FF => self.fb.tile_rom[addr as usize] = byte,
+            0x4800..=0x4FEF => self.fb.vram[addr as usize] = byte,
+
             0x5000 => {
                 self.int_enable = true;
                 self.ctx.cpu.int.irq = (byte & 0x01) != 0;
