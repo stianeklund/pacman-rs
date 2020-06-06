@@ -44,6 +44,7 @@ pub struct IN1 {
     joy_right: bool,
     joy_down: bool,
 }
+#[derive(Debug)]
 enum Map {
     SpriteRom,
     ColorRom,
@@ -72,48 +73,17 @@ impl Pacman {
     }
 
     fn load(&mut self, file: &mut File, map: Map, offset: usize) {
-        match map {
-            Map::SpriteRom => {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf).unwrap();
-                for i in 0..buf.len() {
-                    self.fb.sprite_rom[i + offset] = buf[i];
-                }
-            }
-            Map::ColorRom => {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf).unwrap();
-                for i in 0..buf.len() {
-                    self.fb.color_rom[i + offset] = buf[i];
-                }
-            }
-            Map::TileRom => {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf).unwrap();
-                for i in 0..buf.len() {
-                    self.fb.tile_rom[i + offset] = buf[i];
-                }
-            }
-            Map::PaletteRom => {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf).unwrap();
-                for i in 0..buf.len() {
-                    self.fb.palette_rom[i + offset] = buf[i];
-                }
-            }
-            Map::Rom => {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf).unwrap();
-                for i in 0..buf.len() {
-                    self.ctx.cpu.memory.rom[i + offset] = buf[i];
-                }
-            }
-            Map::Ram => {
-                let mut buf = Vec::new();
-                file.read_to_end(&mut buf).unwrap();
-                for i in 0..buf.len() {
-                    self.ctx.cpu.memory.ram[i + offset] = buf[i];
-                }
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).unwrap();
+
+        for i in 0..buf.len() {
+            match map {
+                Map::SpriteRom => self.fb.sprite_rom[i + offset] = buf[i],
+                Map::ColorRom => self.fb.color_rom[i + offset] = buf[i],
+                Map::TileRom => self.fb.tile_rom[i + offset] = buf[i],
+                Map::PaletteRom => self.fb.palette_rom[i + offset] = buf[i],
+                Map::Rom => self.ctx.cpu.memory.rom[i + offset] = buf[i],
+                Map::Ram => self.ctx.cpu.memory.ram[i + offset] = buf[i],
             }
         }
     }
@@ -142,7 +112,7 @@ impl Pacman {
                         "pacman.6j" => self.load(&mut file, Map::Rom, 0x3000),
                         "pacman.5e" => self.load(&mut file, Map::TileRom, 0),
                         "pacman.5f" => self.load(&mut file, Map::SpriteRom, 0),
-                        _ => {}
+                        _ => {} // Ignore non matches
                     };
                 }
                 println!("Found and loaded rom files");

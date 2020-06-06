@@ -14,7 +14,7 @@ mod tests {
         assert_eq!(i.cpu.flags.hf, true);
     }
 
-    #[test]
+   #[test]
     fn test_hf_high_byte() {
         // The half carry flag should be set once we increment HL from 00FFh to 0000h
         let mut i = Interconnect::new();
@@ -28,30 +28,29 @@ mod tests {
 
     #[test]
     fn fast_z80() {
-        // TODO: Add cycle testing!
-        assert_eq!(exec_test("tests/prelim.com"), 0x447); // Should have executed 8710 cycles
-        assert_eq!(exec_test("tests/8080PRE.COM"), 0x32F);
-        assert_eq!(exec_test("tests/CPUTEST.COM"), 0x0C2E);
+        // Assert the tests executed CPU cycle amount vs real hardware cycles
+        assert_eq!(exec_test("tests/prelim.com"), 8721);
+        assert_eq!(exec_test("tests/8080PRE.COM"), 7772);
+        assert_eq!(exec_test("tests/CPUTEST.COM"), 240551424);
     }
 
-    // #[test]
+    #[test]
+    #[ignore] // Ignored for now as they do not pass
     fn z80_precise() {
-        assert_eq!(exec_test("tests/zexdoc.com"), 0x0000);
-        // assert_eq!(exec_test("tests/zexall.com"), 0x0000);
+        assert_eq!(exec_test("tests/zexdoc.com"), 46734978649);
+        assert_eq!(exec_test("tests/zexall.com"), 46734978649);
     }
 
     // #[test]
     fn all_tests() {
-        assert_eq!(exec_test("tests/prelim.com"), 0x447);
-        assert_eq!(exec_test("tests/8080PRE.COM"), 0x32F);
-        assert_eq!(exec_test("tests/CPUTEST.COM"), 0x3B25);
-        assert_eq!(exec_test("tests/zexall.com"), 0x0000);
-        assert_eq!(exec_test("tests/zexdoc.com"), 0x0000);
-        // assert_eq!(exec_test("tests/8080EX1.COM"), 0x00);
-        // assert_eq!(exec_test("tests/8080EXM.COM"), 0x00)
+        assert_eq!(exec_test("tests/prelim.com"), 8721);
+        assert_eq!(exec_test("tests/8080PRE.COM"), 7772);
+        assert_eq!(exec_test("tests/CPUTEST.COM"), 240551424);
+        assert_eq!(exec_test("tests/zexall.com"), 0);
+        assert_eq!(exec_test("tests/zexdoc.com"), 0);
     }
 
-    fn exec_test(bin: &str) -> u16 {
+    fn exec_test(bin: &str) -> usize {
         let mut i = Interconnect::new();
         i.cpu.reset();
         i.cpu.memory.load_tests(bin);
@@ -70,9 +69,11 @@ mod tests {
 
         // All test binaries start at 0x0100.
         i.cpu.reg.pc = 0x0100;
-        let _cycles = 0;
+        let mut reset_counter = 0;
 
         loop {
+            // Turn CMP Compatability on. This turns off any memory mapping
+            i.cpu.cpm_compat = true;
             // i.cpu.debug = true;
             i.run_tests();
 
@@ -97,17 +98,24 @@ mod tests {
                     print!("{}", i.cpu.reg.e as char);
                 }
             }
-
-            if i.cpu.reg.pc == 0 {
-                println!(
-                    "\nBDOS routine called, jumped to: 0 from {:04X}",
-                    i.cpu.reg.prev_pc
-                );
-                println!("Cycles executed: {}\n", i.cpu.cycles);
-                println!();
+            if i.cpu.opcode == 0xD3 {
+                break;
+            } else if i.cpu.reg.pc == 0 {
+                {
+                    println!(
+                        "\nBDOS routine called, jumped to: 0 from {:04X}",
+                        i.cpu.reg.prev_pc
+                    );
+                    reset_counter += 1;
+                }
+            }
+            if reset_counter > 1 {
                 break;
             }
+
         }
-        i.cpu.reg.prev_pc
+        println!("Cycles executed: {}\n", i.cpu.cycles);
+
+        i.cpu.cycles
     }
 }

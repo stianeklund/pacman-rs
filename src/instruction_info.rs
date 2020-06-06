@@ -4,7 +4,7 @@ use std::fmt::Formatter;
 #[derive(Default)]
 pub struct Instruction {
     pub name: String,   // Mnemonic
-    pub size: u8,       // Instruction size (bytes)
+    pub bytes: u8,       // Instruction size (bytes)
     pub cycles: u8,     // Clock cycles (if branch taken)
     pub alt_cycles: u8, // If not branch taken etc.
     pub opcode: u16,
@@ -22,7 +22,7 @@ impl fmt::Debug for Instruction {
         writeln!(fmt, "")?;
         writeln!(fmt, "Instruction :{}", self.name)?;
         writeln!(fmt, "Opcode      :{:04x}", self.opcode)?;
-        writeln!(fmt, "Size        :{}", self.size)?;
+        writeln!(fmt, "Size        :{}", self.bytes)?;
         writeln!(fmt, "Cycles      :{}", self.cycles)?;
         writeln!(fmt, "Alt cycles  :{}", self.alt_cycles)?;
         writeln!(fmt, "")
@@ -65,7 +65,7 @@ impl Instruction {
     pub fn new() -> Self {
         Self {
             name: String::with_capacity(5),
-            size: 0,
+            bytes: 0,
             cycles: 0,
             alt_cycles: 0,
             opcode: 0,
@@ -76,7 +76,7 @@ impl Instruction {
         Instruction {
             // name: mnemonic.to_string().pad_to_width_with_alignment(12, Alignment::Left),
             name: format!("{:w$}", mnemonic, w = 12),
-            size,
+            bytes: size,
             cycles,
             alt_cycles,
             opcode,
@@ -967,7 +967,7 @@ impl Instruction {
             0xFF => Instruction::from("RST 38H", 1, 11, 0, 0xFF),
             _ => Instruction {
                 name: "Unknown".to_string(),
-                size: 0,
+                bytes: 0,
                 cycles: 0,
                 alt_cycles: 0,
                 opcode,

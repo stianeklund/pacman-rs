@@ -1,6 +1,54 @@
 use crate::instruction_info::{Instruction, Register, Register::*};
 use crate::memory::{Memory, MemoryRW};
 
+pub struct Cpu {
+    pub current_instruction: String,
+    pub opcode: u16,
+    pub breakpoint: bool,
+    pub debug: bool,
+    pub reg: Registers,
+    pub flags: Flags,
+    pub cycles: usize, // CPU T states
+    pub io: Io,
+    pub int: Interrupt,
+    pub instruction: Instruction,
+    pub int_pending: bool,
+    pub cpm_compat: bool,
+    pub memory: Memory,
+}
+
+#[derive(Default)]
+pub struct Registers {
+    // Main Registers
+    pub a: u8,
+    pub b: u8,
+    pub c: u8,
+    pub d: u8,
+    pub e: u8,
+    pub h: u8,
+    pub l: u8,
+    // Shadow registers
+    pub a_: u8,
+    pub b_: u8,
+    pub c_: u8,
+    pub d_: u8,
+    pub e_: u8,
+    pub h_: u8,
+    pub l_: u8,
+
+    // Alternate registers:
+    pub m: u8,
+    pub i: u8, // Interrupt vector
+    pub r: u8, // Refresh counter
+    pub pc: u16,
+    pub prev_pc: u16,
+
+    // Index Registers:
+    pub sp: u16,
+    pub ix: u16,
+    pub iy: u16,
+}
+
 #[derive(Default)]
 pub struct Io {
     pub port: u8,
@@ -46,53 +94,6 @@ pub struct Interrupt {
     pub iff2: bool,
     pub mode: u8,
     pub data: u8,
-}
-
-pub struct Cpu {
-    pub current_instruction: String,
-    pub opcode: u16,
-    pub breakpoint: bool,
-    pub debug: bool,
-    pub reg: Registers,
-    pub flags: Flags,
-    pub cycles: usize, // CPU T states
-    pub io: Io,
-    pub int: Interrupt,
-    pub instruction: Instruction,
-    pub int_pending: bool,
-    pub memory: Memory,
-}
-
-#[derive(Default)]
-pub struct Registers {
-    // Main Registers
-    pub a: u8,
-    pub b: u8,
-    pub c: u8,
-    pub d: u8,
-    pub e: u8,
-    pub h: u8,
-    pub l: u8,
-    // Shadow registers
-    pub a_: u8,
-    pub b_: u8,
-    pub c_: u8,
-    pub d_: u8,
-    pub e_: u8,
-    pub h_: u8,
-    pub l_: u8,
-
-    // Alternate registers:
-    pub m: u8,
-    pub i: u8, // Interrupt vector
-    pub r: u8, // Refresh counter
-    pub pc: u16,
-    pub prev_pc: u16,
-
-    // Index Registers:
-    pub sp: u16,
-    pub ix: u16,
-    pub iy: u16,
 }
 
 impl Flags {
@@ -167,14 +168,19 @@ impl Flags {
 
 impl MemoryRW for Cpu {
     fn read8(&self, addr: u16) -> u8 {
-        if addr < 0x4000 {
-            self.memory[addr]
-        } else if addr == 0x5000 {
-            return self.int.int as u8;
-        } else if addr < 0x5000 {
-            self.memory.ram[addr as usize - 0x4000]
+        if self.cpm_compat {
+            return self.memory[addr];
         } else {
-            self.memory.ram[addr as usize]
+            if addr < 0x4000 {
+                // 0..0x4000
+                self.memory.rom[addr as usize]
+            } else if addr == 0x5000 {
+                return self.int.int as u8;
+            } else if addr < 0x5000 {
+                self.memory.ram[addr as usize - 0x4000]
+            } else {
+                self.memory.rom[addr as usize]
+            }
         }
     }
     fn read16(&self, addr: u16) -> u16 {
@@ -186,15 +192,20 @@ impl MemoryRW for Cpu {
         self.write8(addr.wrapping_add(1), (word >> 8) as u8);
     }
     fn write8(&mut self, addr: u16, byte: u8) {
-        if addr < 0x4000 {
-            self.memory.ram[addr as usize] = byte
-        } else if addr < 0x5000 {
-            self.memory.ram[addr as usize - 0x4000] = byte;
-        } else if addr == 0x5000 {
-            self.int_pending = true;
-            self.int.irq = true;
+        if self.cpm_compat {
+            return self.memory[addr] = byte;
         } else {
-            self.memory.ram[addr as usize] = byte;
+            if addr < 0x4000 {
+                eprintln!("Attempting write to ROM: {:04x}", addr);
+                eprintln!("Called by:{:#?}", self.instruction);
+            } else if addr < 0x5000 {
+                self.memory.ram[addr as usize - 0x4000] = byte;
+            } else if addr == 0x5000 {
+                self.int_pending = true;
+                self.int.irq = true;
+            } else {
+                self.memory.ram[addr as usize] = byte;
+            }
         }
     }
 }
@@ -214,6 +225,7 @@ impl Cpu {
             int_pending: false,
             instruction: Instruction::new(),
             memory: Memory::new(),
+            cpm_compat: false,
         }
     }
 
@@ -285,7 +297,11 @@ impl Cpu {
                 self.reg.l = (value & 0xFF) as u8;
             }
             IX => self.reg.ix = value,
+            IXH => self.reg.ix = (value >> 8) as u16,
+            IXL => self.reg.ix = (value & 0xFF) as u16,
             IY => self.reg.iy = value,
+            IYH => self.reg.iy = (value >> 8) as u16,
+            IYL => self.reg.iy = (value & 0xFF) as u16,
             SP => self.reg.sp = value,
             _ => panic!("Attempting to write to a non register pair: {:#?}", reg),
         }
@@ -979,6 +995,16 @@ impl Cpu {
         self.adv_pc(3);
     }
 
+    fn ld_ixh_ixl(&mut self, reg: Register) {
+        let value = self.read8(self.reg.pc + 1);
+        match reg {
+            IXL | IXH | IYH | IYL => self.write_pair_direct(reg, value as u16),
+            _ => panic!(),
+        }
+        self.adv_pc(self.instruction.bytes as u16);
+        self.adv_cycles(self.instruction.cycles as usize);
+
+    }
     // 0xDD Instruction LD IX/IY or IXH IYL etc + *
     // E.g stores A to the memory location pointed to by IX + *
     fn ld_dd(&mut self, dst: Register, src: Register) {
@@ -1281,7 +1307,6 @@ impl Cpu {
 
     fn pop(&mut self, reg: Register) {
         let value = self.read16(self.reg.sp);
-
         self.write_pair_direct(reg, value);
         self.reg.sp = self.reg.sp.wrapping_add(2);
 
@@ -1423,25 +1448,14 @@ impl Cpu {
     }
 
     // RESET (used for interrupt jump / calls)
-    pub fn rst(&mut self, value: u8) {
+    pub fn rst(&mut self, value: u16) {
         // Address to return to after interrupt is finished.
-        let ret = self.reg.pc + 1;
+        let ret: u16 = self.reg.pc.wrapping_add(3);
+        self.memory[self.reg.sp.wrapping_sub(1)] = (ret >> 8) as u8;
+        self.memory[self.reg.sp.wrapping_sub(2)] = ret as u8;
         self.reg.sp = self.reg.sp.wrapping_sub(2);
-        self.write16(self.reg.sp, ret);
         self.reg.prev_pc = self.reg.pc;
-
-        match value {
-            0 => self.reg.pc = 0x0000,
-            1 => self.reg.pc = 0x0008,
-            2 => self.reg.pc = 0x0010,
-            3 => self.reg.pc = 0x0018,
-            4 => self.reg.pc = 0x0020,
-            5 => self.reg.pc = 0x0028,
-            6 => self.reg.pc = 0x0030,
-            7 => self.reg.pc = 0x0038,
-            _ => println!("Couldn't match RST value, {:04X}", value),
-        };
-
+        self.reg.pc = value;
         self.adv_cycles(11);
     }
 
@@ -1721,7 +1735,7 @@ impl Cpu {
             0xC4 => self.call_cond(0xC4, !self.flags.zf),
             0xC5 => self.push(BC),
             0xC6 => self.adi(),
-            0xC7 => self.rst(0),
+            0xC7 => self.rst(0x0000),
             0xC8 => self.ret_cond(self.flags.zf),
             0xC9 => self.ret(),
 
@@ -1740,7 +1754,7 @@ impl Cpu {
             0xCC => self.call_cond(0xCC, self.flags.zf),
             0xCD => self.call(0xCD),
             0xCE => self.adc_im(),
-            0xCF => self.rst(1),
+            0xCF => self.rst(0x0008),
 
             0xD0 => self.ret_cond(!self.flags.cf),
             0xD1 => self.pop(DE),
@@ -1749,7 +1763,7 @@ impl Cpu {
             0xD4 => self.call_cond(0xD4, !self.flags.cf),
             0xD5 => self.push(DE),
             0xD6 => self.sui(),
-            0xD7 => self.rst(2),
+            0xD7 => self.rst(0x0010),
             0xD8 => self.ret_cond(self.flags.cf),
             0xD9 => self.exx(),
             0xDA => self.jp_cond(self.flags.cf),
@@ -1779,7 +1793,9 @@ impl Cpu {
                     0x23 => self.inx(IX),
                     0x24 => unimplemented!(),
                     0x25 => unimplemented!(),
-                    0x26 => unimplemented!(),
+                    0x26 => {
+                        self.ld_ixh_ixl(IXH);
+                    },
                     0x29 => unimplemented!(),
                     0x2A => unimplemented!(),
                     0x2B => unimplemented!(),
@@ -1817,7 +1833,7 @@ impl Cpu {
                 }
             }
             0xDE => self.sbi(),
-            0xDF => self.rst(3),
+            0xDF => self.rst(0x0018),
             0xE0 => self.ret_cond(!self.flags.pf),
             0xE1 => self.pop(HL),
             0xE2 => self.jp_cond(!self.flags.pf),
@@ -1825,7 +1841,7 @@ impl Cpu {
             0xE4 => self.call_cond(0xE4, !self.flags.pf),
             0xE5 => self.push(HL),
             0xE6 => self.ani(),
-            0xE7 => self.rst(4),
+            0xE7 => self.rst(0x0020),
             0xE8 => self.ret_cond(self.flags.pf),
             0xE9 => self.pchl(),
 
@@ -1868,7 +1884,7 @@ impl Cpu {
             }
 
             0xEE => self.xri(),
-            0xEF => self.rst(5),
+            0xEF => self.rst(0x0028),
             0xF0 => self.ret_cond(!self.flags.sf),
             0xF1 => self.pop(AF),
             0xF2 => self.jp_cond(!self.flags.sf),
@@ -1876,7 +1892,7 @@ impl Cpu {
             0xF4 => self.call_cond(0xF4, !self.flags.sf),
             0xF5 => self.push(AF),
             0xF6 => self.ori(),
-            0xF7 => self.rst(4),
+            0xF7 => self.rst(0x0020),
             0xF8 => self.ret_cond(self.flags.sf),
             0xF9 => self.sphl(),
             0xFA => self.jp_cond(self.flags.sf),
@@ -1929,7 +1945,7 @@ impl Cpu {
                 }
             }
             0xFE => self.cp(),
-            0xFF => self.rst(7),
+            0xFF => self.rst(0x0038),
             _ => println!("Unknown opcode: {:04X}", self.opcode),
         }
     }

@@ -23,7 +23,6 @@ fn main() {
         // std::io::stdin().read_line(&mut String::new()).unwrap();
         pac.ctx.execute_cpu();
         // i.keypad.key_down(&mut i.cpu.io, &display.window);
-
         pac.fb.draw_pixel();
         pac.fb.window.update_with_buffer(&pac.fb.raster).unwrap();
 
