@@ -4,7 +4,7 @@ use std::fmt::Formatter;
 #[derive(Default)]
 pub struct Instruction {
     pub name: String,   // Mnemonic
-    pub bytes: u8,       // Instruction size (bytes)
+    pub bytes: u8,      // Instruction size (bytes)
     pub cycles: u8,     // Clock cycles (if branch taken)
     pub alt_cycles: u8, // If not branch taken etc.
     pub opcode: u16,
@@ -84,10 +84,10 @@ impl Instruction {
     }
     // Used for debugging, contains all of the known opcodes, instruction cycles and alternative
     // branch cycles and the respective opcode
-    pub fn decode(opcode: u16) -> Instruction {
+    pub fn decode(opcode: u16) -> Option<Instruction> {
         // MNEMONIC, Byte size, CPU cycles, conditional extra cycles
 
-        match opcode {
+        Option::from(match opcode {
             0x00 => Instruction::from("NOP", 1, 4, 0, 0x00),
             0x01 => Instruction::from("LD BC, **", 3, 10, 0, 0x0),
             0x02 => Instruction::from("LD (BC), A", 1, 7, 0, 0x01),
@@ -548,7 +548,7 @@ impl Instruction {
                 0xCBFD => Instruction::from("SET 7, L", 2, 8, 0, 0xCBFD),
                 0xCBFE => Instruction::from("SET 7, (HL)", 2, 15, 0, 0xCBFE),
                 0xCBFF => Instruction::from("SET 7, A", 2, 8, 0, 0xCBFF),
-                _ => unimplemented!("Unknown CB prefixed instruction:{:02x}", opcode),
+                _ => Instruction::from("UNKNOWN", 0, 0, 0, 0),
             },
             0xCC => Instruction::from("CALL Z, **", 3, 17, 10, 0xCC),
             0xCD => Instruction::from("CALL **", 3, 17, 0, 0xCD),
@@ -934,16 +934,21 @@ impl Instruction {
             0xEDB0 => Instruction::from("LDIR", 2, 21, 16, 0xEDB0),
 
             0xED42 => Instruction::from("SBC (**), BC", 4, 20, 0, 0xED42),
+            0xED43 => Instruction::from("LD (**), BC", 4, 20, 0, 0xED43),
+            0xED46 => Instruction::from("IM 1", 2, 8, 0, 0xED46),
+            0xED47 => Instruction::from("LD I, A", 2, 9, 0, 0xED47),
             0xED52 => Instruction::from("SBC (**), DE", 4, 20, 0, 0xED52),
-            // Stores value of I or R into A
+            0xED56 => Instruction::from("IM 2", 2, 8, 0, 0xED56),
+            0xED57 => Instruction::from("LD A, I", 2, 9, 0, 0xED57),
             0xED5F => Instruction::from("LD A,R", 2, 9, 0, 0xED5F),
             0xED62 => Instruction::from("SBC (**), HL", 4, 20, 0, 0xED62),
+            0xED66 => Instruction::from("IM 0", 2, 8, 0, 0xED66),
             0xED72 => Instruction::from("SBC (**), SP", 4, 20, 0, 0xED72),
 
-            0xED43 => Instruction::from("LD (**), BC", 4, 20, 0, 0xED43),
             0xED53 => Instruction::from("LD (**), DE", 4, 20, 0, 0xED53),
             0xED63 => Instruction::from("LD (**), HL", 4, 20, 0, 0xED63),
             0xED73 => Instruction::from("LD (**), SP", 4, 20, 0, 0xED73),
+            0xED76 => Instruction::from("IM 1", 2, 8, 0, 0xED76),
             0xED7B => Instruction::from("LD SP, (**)", 4, 20, 0, 0xED7B),
             0xEE => Instruction::from("XOR *", 2, 7, 0, 0xEE),
             0xEF => Instruction::from("RST 28H", 1, 11, 0, 0xEF),
@@ -972,6 +977,6 @@ impl Instruction {
                 alt_cycles: 0,
                 opcode,
             },
-        }
+        })
     }
 }

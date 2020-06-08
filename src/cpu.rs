@@ -172,7 +172,6 @@ impl MemoryRW for Cpu {
             return self.memory[addr];
         } else {
             if addr < 0x4000 {
-                // 0..0x4000
                 self.memory.rom[addr as usize]
             } else if addr == 0x5000 {
                 return self.int.int as u8;
@@ -517,6 +516,24 @@ impl Cpu {
 
         self.adv_cycles(7);
         self.adv_pc(2);
+    }
+    // 0xCB Extended Opcode Bit instructions
+    fn bit(&mut self, bit: u8, reg: Register) {
+        // Test bit n of register
+        if reg == HL {
+            self.adv_cycles(4);
+        }
+        let result = self.read_reg(reg) & (1 << bit);
+
+        self.flags.sf = result & 0x80 != 0;
+        self.flags.zf = result & 0xFF == 0;
+        self.flags.yf = result & 0x20 != 0;
+        self.flags.xf = result & 0x08 != 0;
+        self.flags.nf = false;
+        self.flags.hf = true;
+        self.flags.pf = self.flags.zf; // TODO: Double check this
+        self.adv_pc(2);
+        self.adv_cycles(8);
     }
 
     fn djnz(&mut self) {
@@ -1003,7 +1020,6 @@ impl Cpu {
         }
         self.adv_pc(self.instruction.bytes as u16);
         self.adv_cycles(self.instruction.cycles as usize);
-
     }
     // 0xDD Instruction LD IX/IY or IXH IYL etc + *
     // E.g stores A to the memory location pointed to by IX + *
@@ -1412,6 +1428,7 @@ impl Cpu {
         match dst {
             A | B | C | D | E | H | L => {
                 if src == HL {
+                    // LD r, (HL)
                     value = self.read8(addr) as u16;
                     self.adv_cycles(3);
                 } else if (src == R) | (src == I) {
@@ -1428,8 +1445,8 @@ impl Cpu {
             }
 
             HL => {
-                self.memory[addr] = self.read_reg(src);
-                self.write_reg(src, self.memory[self.get_pair(HL)]);
+                // LD (HL, r)
+                self.write8(addr, self.read_reg(src));
                 self.adv_cycles(3);
             }
             I | R => {
@@ -1486,7 +1503,8 @@ impl Cpu {
 
     pub(crate) fn fetch(&mut self) {
         self.opcode = self.read8(self.reg.pc) as u16;
-        self.instruction = Instruction::decode(self.opcode);
+        self.instruction = Instruction::decode(self.opcode)
+            .expect(format!("Unknown opcode:{:04X}", self.opcode).as_str());
 
         if self.instruction.name.to_string().len() < 1 {
             self.current_instruction = format!("{:w$}", self.current_instruction, w = 12);
@@ -1744,11 +1762,31 @@ impl Cpu {
                 self.opcode = self.read8(self.reg.pc + 1) as u16;
                 self.reg.r = (self.reg.r & 0x80) | (self.reg.r.wrapping_add(1)) & 0x7f;
                 match self.opcode {
-                    0xCB00 => unimplemented!(),
-                    0xCB03 => self.rlc(E),
-                    0xCB08 => self.rrc(B),
-                    0xCBC7 => unimplemented!(),
-                    _ => unimplemented!(),
+                    0x00 => self.rlc(B),
+                    0x01 => self.rlc(C),
+                    0x02 => self.rlc(D),
+                    0x03 => self.rlc(E),
+                    0x04 => self.rlc(H),
+                    0x05 => self.rlc(L),
+                    0x06 => self.rlc(HL),
+                    0x03 => self.rlc(E),
+                    0x08 => self.rrc(B),
+                    0xC7 => unimplemented!("0xCBC7"),
+                    0x40 => self.bit(0, B),
+                    0x41 => self.bit(0, C),
+                    0x42 => self.bit(0, D),
+                    0x43 => self.bit(0, E),
+                    0x44 => self.bit(0, H),
+                    0x45 => self.bit(0, L),
+                    0x46 => self.bit(0, HL),
+                    0x50 => self.bit(2, B),
+                    0x51 => self.bit(2, C),
+                    0x52 => self.bit(2, D),
+                    0x53 => self.bit(2, E),
+                    0x54 => self.bit(2, H),
+                    0x55 => self.bit(2, L),
+                    0x56 => self.bit(2, HL),
+                    _ => unimplemented!("Unknown opcode:{:04x}", self.opcode),
                 }
             }
             0xCC => self.call_cond(0xCC, self.flags.zf),
@@ -1772,7 +1810,8 @@ impl Cpu {
             0xDD => {
                 self.opcode = self.read8(self.reg.pc + 1) as u16;
                 self.reg.r = (self.reg.r & 0x80) | self.reg.r.wrapping_add(1) & 0x7f;
-                self.instruction = Instruction::decode(self.opcode);
+                self.instruction = Instruction::decode(self.opcode)
+                    .expect(format!("Unknown opcode:{:04x}", self.opcode).as_str());
 
                 match self.opcode {
                     0x09 => unimplemented!("{:#?}", self.instruction),
@@ -1791,24 +1830,24 @@ impl Cpu {
                         self.adv_cycles(20);
                     }
                     0x23 => self.inx(IX),
-                    0x24 => unimplemented!(),
+                    0x24 => unimplemented!("{:04x}", self.opcode),
                     0x25 => unimplemented!(),
                     0x26 => {
                         self.ld_ixh_ixl(IXH);
-                    },
-                    0x29 => unimplemented!(),
-                    0x2A => unimplemented!(),
-                    0x2B => unimplemented!(),
-                    0x2C => unimplemented!(),
-                    0x2D => unimplemented!(),
-                    0x2E => unimplemented!(),
-                    0x34 => unimplemented!(),
-                    0x35 => unimplemented!(),
-                    0x36 => unimplemented!(),
-                    0x39 => unimplemented!(),
-                    0x3C => unimplemented!(),
-                    0x3D => unimplemented!(),
-                    0x3E => unimplemented!(),
+                    }
+                    0x29 => unimplemented!("{:04x}", self.opcode),
+                    0x2A => unimplemented!("{:04x}", self.opcode),
+                    0x2B => unimplemented!("{:04x}", self.opcode),
+                    0x2C => unimplemented!("{:04x}", self.opcode),
+                    0x2D => unimplemented!("{:04x}", self.opcode),
+                    0x2E => unimplemented!("{:04x}", self.opcode),
+                    0x34 => unimplemented!("{:04x}", self.opcode),
+                    0x35 => unimplemented!("{:04x}", self.opcode),
+                    0x36 => unimplemented!("{:04x}", self.opcode),
+                    0x39 => unimplemented!("{:04x}", self.opcode),
+                    0x3C => unimplemented!("{:04x}", self.opcode),
+                    0x3D => unimplemented!("{:04x}", self.opcode),
+                    0x3E => unimplemented!("{:04x}", self.opcode),
                     0xE1 => self.pop(IX),
                     0xE5 => self.push(IX),
                     0x7E => {
@@ -1902,8 +1941,8 @@ impl Cpu {
                 self.opcode = self.read8(self.reg.pc + 1) as u16;
                 self.reg.r = (self.reg.r & 0x80) | (self.reg.r.wrapping_add(1)) & 0x7f;
                 match self.opcode {
-                    0x09 => unimplemented!(),
-                    0x19 => unimplemented!(),
+                    0x09 => unimplemented!("{:04x}", self.opcode),
+                    0x19 => unimplemented!("{:04x}", self.opcode),
                     0x21 => {
                         self.reg.iy = self.read16(self.reg.pc + 2);
                         self.adv_pc(4);
@@ -2052,18 +2091,18 @@ impl Cpu {
             match self.int.mode {
                 0 => {
                     self.adv_cycles(11);
-                    println!("INT VECTOR {:04x}", self.int.vector);
-                    println!("INT Data {:04x}", self.int.data);
+                    println!("Servicing interrupt, mode 0");
                     self.decode(self.int.data as u16);
                 }
                 1 => {
                     // Mode 1, RST38h, regardless of bus value or I reg value.
+                    println!("Servicing interrupt, mode 1");
                     self.adv_cycles(13);
-                    self.rst(7);
-                    println!("Interrupt mode 1");
+                    self.rst(0x38);
                 }
                 2 => {
                     // self.reg.i * 256 + busvalue
+                    println!("Servicing interrupt, mode 2");
                     self.adv_cycles(19);
                     let addr =
                         self.read16((self.reg.i).wrapping_shl(8) as u16) | self.int.vector as u16;
