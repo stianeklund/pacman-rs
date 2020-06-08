@@ -191,6 +191,7 @@ impl MemoryRW for Cpu {
         self.write8(addr.wrapping_add(1), (word >> 8) as u8);
     }
     fn write8(&mut self, addr: u16, byte: u8) {
+
         if self.cpm_compat {
             return self.memory[addr] = byte;
         } else {
@@ -622,8 +623,9 @@ impl Cpu {
     // Extended instructions: ex: LD (**), HL
     // 0xED63, 0xED53 etc..
     // Stores (REGPAIR) into the memory loc pointed to by **
+    // TODO & LOAD INDIRECT BUG?
     fn ld_nn(&mut self, reg: Register) {
-        let ptr = self.read16(self.reg.pc);
+        let ptr = self.read16(self.reg.pc + 1);
         self.write16(ptr, self.get_pair(reg));
         self.adv_cycles(20);
         self.adv_pc(4);
@@ -633,7 +635,7 @@ impl Cpu {
     // 0xED6B, 0xED5B etc..
     // Loads the value pointed to by ** into (REGPAIR)
     fn load_indirect(&mut self, reg: Register) {
-        let word = self.read16(self.reg.pc);
+        let word = self.read16(self.reg.pc + 1);
         self.write_pair_direct(reg, self.read16(word));
         self.adv_cycles(20);
         self.adv_pc(4);
@@ -1357,7 +1359,8 @@ impl Cpu {
     }
     fn in_a(&mut self) {
         self.io.port = self.read8(self.reg.pc + 1);
-        self.reg.a = self.io.port;
+        self.reg.a = 0xFF; // TODO: hack (other emu's do this for zexdoc??)
+                           // self.reg.a = self.io.port;
         self.adv_cycles(11);
         self.adv_pc(2);
     }
@@ -1972,6 +1975,13 @@ impl Cpu {
                         self.instruction.cycles = 8;
                         self.jp(self.get_pair(IY))
                     }
+                    0x66 => {
+                        let byte = self.read8(self.reg.pc + 2);
+                        let addr = self.reg.iy.wrapping_add(byte as u16);
+                        self.reg.h = self.read8(addr) as u8;
+                        self.adv_pc(3);
+                        self.adv_cycles(19);
+                    }
                     0x7E => {
                         // byte is the signed displacement byte
                         let byte = self.read8(self.reg.pc + 2) as i8;
@@ -2088,21 +2098,30 @@ impl Cpu {
             // Most commonly the instruction executed on the bus is RST,
             // but it can be any instruction (technically)
             // The I register is not used for IM0
+            // TODO investigate interrupt processing
             match self.int.mode {
                 0 => {
-                    self.adv_cycles(11);
-                    println!("Servicing interrupt, mode 0");
-                    self.decode(self.int.data as u16);
+                    if self.int.data != 0 {
+                        self.adv_cycles(11);
+                        if self.debug {
+                            println!("Servicing interrupt, mode 0");
+                        }
+                        self.decode(self.int.data as u16);
+                    }
                 }
                 1 => {
                     // Mode 1, RST38h, regardless of bus value or I reg value.
-                    println!("Servicing interrupt, mode 1");
+                    if self.debug {
+                        println!("Servicing interrupt, mode 1");
+                    }
                     self.adv_cycles(13);
                     self.rst(0x38);
                 }
                 2 => {
                     // self.reg.i * 256 + busvalue
-                    println!("Servicing interrupt, mode 2");
+                    if self.debug {
+                        println!("Servicing interrupt, mode 2");
+                    }
                     self.adv_cycles(19);
                     let addr =
                         self.read16((self.reg.i).wrapping_shl(8) as u16) | self.int.vector as u16;

@@ -18,12 +18,13 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     // pac.ctx.cpu.memory.load_bin(&args);
     pac.load_rom(&args);
-
+    pac.init();
     loop {
         // std::io::stdin().read_line(&mut String::new()).unwrap();
         pac.ctx.execute_cpu();
         // i.keypad.key_down(&mut i.cpu.io, &display.window);
-        pac.fb.draw_pixel();
+
+        pac.draw();
         pac.fb.window.update_with_buffer(&pac.fb.raster).unwrap();
 
         /*if i.frame_count % 5 == 1 {
