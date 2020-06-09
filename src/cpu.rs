@@ -191,7 +191,6 @@ impl MemoryRW for Cpu {
         self.write8(addr.wrapping_add(1), (word >> 8) as u8);
     }
     fn write8(&mut self, addr: u16, byte: u8) {
-
         if self.cpm_compat {
             return self.memory[addr] = byte;
         } else {

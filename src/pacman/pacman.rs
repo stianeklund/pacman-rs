@@ -1,10 +1,11 @@
+use std::convert::TryInto;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Error, Read};
 use std::path::Path;
 
 use crate::interconnect::Interconnect;
 use crate::memory::MemoryRW;
-use crate::pacman::display::Display;
+use crate::pacman::display::{Display, HEIGHT, WIDTH};
 
 pub struct Pacman {
     pub int_vector: u8,
@@ -78,14 +79,14 @@ impl Pacman {
 
     fn load(&mut self, file: &mut File, map: Map, offset: usize) {
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf).unwrap();
+        file.read_to_end(&mut buf).expect("Unable to read file");
 
         for i in 0..buf.len() {
             match map {
                 Map::SpriteRom => self.fb.sprite_rom[i] = buf[i],
                 Map::ColorRom => self.fb.color_rom[i] = buf[i],
                 Map::TileRom => self.fb.tile_rom[i] = buf[i],
-                Map::PaletteRom => self.fb.palette_rom[i + offset] = buf[i],
+                Map::PaletteRom => self.fb.palette_rom[i] = buf[i],
                 Map::Rom => self.ctx.cpu.memory.rom[i + offset] = buf[i],
                 Map::Ram => self.ctx.cpu.memory.ram[i + offset] = buf[i],
             }
@@ -105,27 +106,48 @@ impl Pacman {
                 let rom = path.read_dir().unwrap();
                 for entry in rom {
                     let f = entry.unwrap();
-                    let mut file = File::open(f.path().as_path()).unwrap();
+                    let file = File::open(f.path().as_path());
 
-                    match f.file_name().to_str().unwrap() {
-                        "82s123.7f" => self.load(&mut file, Map::ColorRom, 0),
-                        "82s126.4a" => self.load(&mut file, Map::PaletteRom, 0),
-                        "pacman.6e" => self.load(&mut file, Map::Rom, 0),
-                        "pacman.6f" => self.load(&mut file, Map::Rom, 0x1000),
-                        "pacman.6h" => self.load(&mut file, Map::Rom, 0x2000),
-                        "pacman.6j" => self.load(&mut file, Map::Rom, 0x3000),
-                        "pacman.5e" => self.load(&mut file, Map::TileRom, 0),
-                        "pacman.5f" => self.load(&mut file, Map::SpriteRom, 0),
-                        _ => {} // Ignore non matches
-                    };
+                    match f.file_name().to_str() {
+                        Some("82s123.7f") => self.load(&mut file.unwrap(), Map::ColorRom, 0),
+                        Some("82s126.4a") => self.load(&mut file.unwrap(), Map::PaletteRom, 0),
+                        Some("pacman.6e") => self.load(&mut file.unwrap(), Map::Rom, 0),
+                        Some("pacman.6f") => self.load(&mut file.unwrap(), Map::Rom, 0x1000),
+                        Some("pacman.6h") => self.load(&mut file.unwrap(), Map::Rom, 0x2000),
+                        Some("pacman.6j") => self.load(&mut file.unwrap(), Map::Rom, 0x3000),
+                        Some("pacman.5e") => self.load(&mut file.unwrap(), Map::TileRom, 0),
+                        Some("pacman.5f") => self.load(&mut file.unwrap(), Map::SpriteRom, 0),
+                        _ => {} // Do nothing for non matches
+                    }
                 }
-                println!("Found and loaded rom files");
+                println!("Rom files found & loaded..");
+            } else if path.is_file() || !path.is_dir() {
+                eprintln!(
+                    "Pacman roms not found, please check your rom directory or provided arguments"
+                );
+                panic!(format!("Attempted to load: {}", path.display()));
             }
         }
     }
-    pub(crate) fn draw(&mut self) {
-        // self.fb.draw_tile(93, 0,0);
-        self.fb.draw_tile(4);
+
+    pub fn render_sprites(&mut self) {
+        let mut sprite = 0;
+        for mut y in 0..8 {
+            for mut x in 0..8 {
+                self.fb.draw_sprite(sprite, x * 8, y * 8);
+                sprite = sprite.wrapping_add(1);
+            }
+        }
+    }
+    // Render the whole tile map
+    pub(crate) fn render_tiles(&mut self) {
+        let mut tile = 0;
+        for mut y in 0..16 {
+            for mut x in 0..16 {
+                self.fb.draw_tile(tile, x * 8, y * 8);
+                tile = tile.wrapping_add(1);
+            }
+        }
     }
 }
 

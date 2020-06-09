@@ -24,7 +24,7 @@ fn main() {
         pac.ctx.execute_cpu();
         // i.keypad.key_down(&mut i.cpu.io, &display.window);
 
-        pac.draw();
+        pac.render_tiles();
         pac.fb.window.update_with_buffer(&pac.fb.raster).unwrap();
 
         /*if i.frame_count % 5 == 1 {

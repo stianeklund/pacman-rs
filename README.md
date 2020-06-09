@@ -48,18 +48,20 @@ Jump to 0 from 032F
 #### Zexall
 
 ```
-Not compatible yet.
+Does not pass.
 ```
 #### Zexdoc
 
 ```
-Not compatible yet.
+Does not pass.
 ```
 --- 
 
 ### Pacman 
 
-* Rendering not implemented yet.
+Rendering is not fully implemented yet.
+
+![](https://i.imgur.com/nnNePst.png)
 
 
 ---
@@ -77,24 +79,10 @@ Run all tests: `cargo test -- --nocapture`
 Please make sure you build the project as `release`, otherwise it will run at slow speeds.
 You will have to source the rom files on your own.
 
-`cargo run --release pacman.rom` or `cargo run --release pacman.6e pacman.6f pacman.6h pacman.6j pacman.5e pacman.5f`
+`cargo run --release /path/to/pacman_files/`
 
-The emulator supports loading split files or single binaries.
 
 TODO: *SHA /MD5 here.*
-
-
-If you have multiple files you can merge them with `cat` or `copy \b` for convenience.
-
-##### Merging the rom files into one file:
-
-Linux, Unix, MacOS: 
-
-* `cat pacman.6e pacman.6f pacman.6h pacman.6j pacman.5e pacman.5f > pacman.rom`
-
-Windows:
-* `copy /b pacman.6e+pacman.6f+pacman.6h+pacman.6j+pacman.5e+pacman.5f pacman.rom`
-
 
 ---
 
