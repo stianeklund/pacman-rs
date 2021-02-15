@@ -53,15 +53,18 @@ Does not pass.
 #### Zexdoc
 
 ```
+Some insane bug here that I cannot find, the diff's between emus is so large that I'm running out of memory.
+Even when isolating the tests it is not easy to find.
 Does not pass.
 ```
 --- 
 
-### Pacman 
+### Pacman
 
-Rendering is not fully implemented yet.
+Rendering is still WIP, and not fully implemented yet.
+We can however render the tile map:
 
-![](https://i.imgur.com/nnNePst.png)
+![](https://i.imgur.com/jyDHJZJ.png)
 
 
 ---
@@ -80,7 +83,6 @@ Please make sure you build the project as `release`, otherwise it will run at sl
 You will have to source the rom files on your own.
 
 `cargo run --release /path/to/pacman_files/`
-
 
 TODO: *SHA /MD5 here.*
 

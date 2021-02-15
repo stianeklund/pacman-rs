@@ -4,4 +4,11 @@ version = "0.1.0"
 authors = ["Stian Eklund <stian.eklund@gmail.com>"]
 edition = "2018"
 [dependencies]
-minifb ="0.10.0"
+minifb ="0.19.2"
+
+z80-rs = { git = "https://github.com/stianeklund/z80-rs", branch = "master"}
+#z80-rs = { path = "../z80-rs"}
+flexi_logger = "0.15.5"
+log = "0.4.8"
+[profile.release]
+debug = true
